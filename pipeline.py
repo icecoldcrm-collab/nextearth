@@ -1,35 +1,40 @@
 import pandas as pd
 import numpy as np
 import os
-import ssl  
-import urllib.request  
+import requests  # Upgraded to handle parameter encoding and session routing securely
 from io import StringIO
 
 def run_exoplanet_discovery_pipeline(output_filename="habitable_candidates.csv"):
     print("🛰️ Connecting to NASA Exoplanet Archive (Live API Engine)...")
     
-    # FIXED CORES: Removed 'tic_id' to strictly request only verified planetary parameters
-    url = "https://caltech.edu"
+    # Base API endpoint without manual encoding strings attached
+    base_url = "https://caltech.edu"
+    
+    # Pass parameters as a clean Python dictionary. 'requests' will encode this safely.
+    query_params = {
+        'query': 'select pl_name, pl_rade, pl_orbper, st_teff, st_rad, st_lum from ps where default_flag=1',
+        'format': 'csv'
+    }
     
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
     
-    ssl_context = ssl._create_unverified_context()
-    req = urllib.request.Request(url, headers=headers)
+    print("📥 Opening live data stream link with secure parameter maps...")
     
-    print("📥 Opening live data stream link...")
-    with urllib.request.urlopen(req, context=ssl_context) as response:
-        raw_text = response.read().decode('utf-8')
+    # Execute the request with automated encoding parameters and SSL verification bypass
+    response = requests.get(base_url, params=query_params, headers=headers, timeout=60, verify=False)
+    raw_text = response.text
+    
+    # Intercept checks to catch HTML redirects or server error payloads immediately
+    if response.status_code != 200 or "ERROR" in raw_text or "<html" in raw_text:
+        print(f"❌ Server rejected request. Status Code: {response.status_code}")
+        print("Inspecting returned server payload response:")
+        print(raw_text[:400])
+        raise RuntimeError("NASA API request rejected or misrouted to host homepage.")
         
-        # Security intercept check to see if we got an HTML redirection page instead of data rows
-        if "ERROR" in raw_text or "<html" in raw_text:
-            print("❌ Server redirection error detected. Inspecting payload head:")
-            print(raw_text[:300])
-            raise RuntimeError("NASA API parameter request rejected by host server.")
-            
-        df = pd.read_csv(StringIO(raw_text))
-        print(f"📥 Telemetry Online! Successfully loaded {len(df)} live records from NASA.")
+    df = pd.read_csv(StringIO(raw_text))
+    print(f"📥 Telemetry Online! Successfully loaded {len(df)} live records from NASA.")
 
     print("🧠 Running Analytics Engine & Habitability Processing Vectors...")
 
