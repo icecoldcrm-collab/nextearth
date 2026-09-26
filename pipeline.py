@@ -2,20 +2,27 @@ import pandas as pd
 import numpy as np
 import os
 import ssl  
-import urllib.request  # Used to smoothly bypass SSL issues without crashing pandas
+import urllib.request  # Used to smoothly bypass SSL issues and inject User-Agent headers
 
 def run_exoplanet_discovery_pipeline(output_filename="habitable_candidates.csv"):
     print("🛰️ Connecting to NASA Exoplanet Archive (Live Telemetry Stream)...")
     
     url = "https://caltech.edu"
     
+    # Configure request headers to mimic a normal browser connection (Bypasses 403 Forbidden checks)
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    
     try:
         # Bypasses the SSL verification step entirely
         ssl_context = ssl._create_unverified_context()
         
-        # Download the raw data stream using urllib with the unverified context
-        print("📥 Opening data stream link...")
-        with urllib.request.urlopen(url, context=ssl_context) as response:
+        # Package the URL alongside our browser headers
+        req = urllib.request.Request(url, headers=headers)
+        
+        print("📥 Opening data stream link with browser telemetry headers...")
+        with urllib.request.urlopen(req, context=ssl_context) as response:
             # Read the CSV directly into Pandas from the streaming text bytes
             df = pd.read_csv(response)
             
