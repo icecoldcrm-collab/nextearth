@@ -8,7 +8,6 @@ from io import StringIO
 def run_exoplanet_discovery_pipeline(output_filename="habitable_candidates.csv"):
     print("🛰️ Connecting to NASA Exoplanet Archive (Live API Engine)...")
     
-    # CORRECT FOOTPRINT: Using the exact, verified 'ps' (Planetary Systems) table schema
     url = "https://caltech.edu"
     
     headers = {
@@ -22,14 +21,10 @@ def run_exoplanet_discovery_pipeline(output_filename="habitable_candidates.csv")
     with urllib.request.urlopen(req, context=ssl_context) as response:
         raw_text = response.read().decode('utf-8')
         
-        # If the API connection fails or triggers a service screen, halt immediately instead of hiding it
         if "ERROR" in raw_text or "<html" in raw_text:
-            print("❌ Server Error Payload Detected Response Readout:")
-            print(raw_text[:500])
             raise RuntimeError("NASA API parameter request rejected by host server.")
             
         df = pd.read_csv(StringIO(raw_text))
-        print(f"📥 Telemetry Online! Successfully loaded {len(df)} live records from NASA.")
 
     print("🧠 Running Analytics Engine & Habitability Processing Vectors...")
 
@@ -53,22 +48,19 @@ def run_exoplanet_discovery_pipeline(output_filename="habitable_candidates.csv")
             return "❌ Outside Habitable Zone"
 
     df['habitability_status'] = df.apply(flag_habitability, axis=1)
-    final_export = df.copy()
-
+    
     output_columns = [
         'pl_name', 'tic_id', 'pl_rade', 'size_classification',
         'calculated_distance_au', 'hz_inner_edge_au', 'hz_outer_edge_au', 'habitability_status'
     ]
     
-    final_export = final_export[output_columns]
-    final_export['sort_priority'] = final_export['habitability_status'].apply(
-        lambda x: 0 if "🎯" in x else (1 if "⚠️" in x else 2)
-    )
-    final_export = final_export.sort_values(by=['sort_priority', 'pl_name']).drop(columns=['sort_priority'])
+    df = df[output_columns]
+    df['sort_priority'] = df['habitability_status'].apply(lambda x: 0 if "🎯" in x else (1 if "⚠️" in x else 2))
+    df = df.sort_values(by=['sort_priority', 'pl_name']).drop(columns=['sort_priority'])
 
-    final_export.to_csv(output_filename, index=False)
-    print(f"💾 Pipeline Execution Successful! Catalogued {len(final_export)} total worlds.")
-    return final_export
+    df.to_csv(output_filename, index=False)
+    print(f"💾 Pipeline Execution Successful! Catalogued {len(df)} total worlds.")
+    return df
 
 if __name__ == "__main__":
     run_exoplanet_discovery_pipeline()
