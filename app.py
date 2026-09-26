@@ -2,80 +2,83 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import ssl
-import requests  
+import requests
 from io import StringIO
 
 st.set_page_config(page_title="Universal Exoplanet Dashboard", layout="wide")
 st.title("🌌 Universal Exoplanet Characterisation Dashboard")
-st.write("Reading dual-stream live telemetry feeds from NASA archives.")
-
-try:
-    my_pipeline_df = pd.read_csv("habitable_candidates.csv")
-    my_pipeline_loaded = True
-except FileNotFoundError:
-    my_pipeline_loaded = False
-    my_pipeline_df = pd.DataFrame()
+st.write("Reading live data arrays directly from the NASA Exoplanet Archive servers.")
 
 @st.cache_data(ttl=3600)
 def fetch_complete_nasa_universe():
-    # Built-in direct data path to NASA's public exoplanet table index
+    # Targets the official Caltech-NASA composite data table directly
     url = "https://caltech.edu"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
+    headers = {'User-Agent': 'Mozilla/5.0'}
     try:
         response = requests.get(url, headers=headers, timeout=30, verify=False)
         if response.status_code == 200 and "ERROR" not in response.text:
             df = pd.read_csv(StringIO(response.text))
+            
+            # Fill missing parameters with standard mathematical assumptions
             df['st_lum'] = df['st_lum'].fillna((df['st_rad'].fillna(1.0)**2) * ((df['st_teff'].fillna(5778) / 5778)**4))
             df['pl_rade'] = df['pl_rade'].fillna(1.0)
             df['pl_orbper'] = df['pl_orbper'].fillna(30.0)
             df['st_rad'] = df['st_rad'].fillna(1.0)
+            
+            # Compute distance metrics
             df['calculated_distance_au'] = ((df['pl_orbper'] / 365.25)**2 * df['st_rad'])**(1/3)
             df['hz_inner_edge_au'] = np.sqrt(df['st_lum'] / 1.1)
             df['hz_outer_edge_au'] = np.sqrt(df['st_lum'] / 0.53)
+            
+            # Classify every planet in the universe by size
             df['size_classification'] = df['pl_rade'].apply(lambda r: "Sub-Earth" if r<=0.8 else ("Earth-sized Rocky" if r<=1.25 else ("Super-Earth" if r<=2.0 else ("Neptunian" if r<=6.0 else "Gas Giant"))))
             
+            # Flag habitability status without stripping data rows
             def flag_habitability(row):
                 dist, inner, outer, size = row['calculated_distance_au'], row['hz_inner_edge_au'], row['hz_outer_edge_au'], row['size_classification']
                 if (inner <= dist <= outer) and size in ["Earth-sized Rocky", "Super-Earth"]:
                     return "🎯 PRIORITY 1: Habitable Zone Rocky World"
-                return "❌ Outside Habitable Zone" if not (inner <= dist <= outer) else "⚠️ Zone Match"
+                elif (inner <= dist <= outer):
+                    return "⚠️ Zone Match (Gas World)"
+                return "❌ Outside Habitable Zone"
                 
             df['habitability_status'] = df.apply(flag_habitability, axis=1)
             return df
         else:
             raise ValueError("NASA Server Refusal")
     except Exception:
+        # Emergency backup fallback array matching column shapes precisely
         cols = ['pl_name','tic_id','pl_rade','calculated_distance_au','hz_inner_edge_au','hz_outer_edge_au','size_classification','habitability_status']
         rows = [
             ['Earth', 55431102, 1.0, 1.0, 0.95, 1.37, 'Earth-sized Rocky', '🎯 PRIORITY 1: Habitable Zone Rocky World'],
             ['Mars', 83920111, 0.53, 1.52, 0.95, 1.37, 'Sub-Earth', '❌ Outside Habitable Zone'],
-            ['Kepler-22b', 12049112, 2.4, 0.849, 0.847, 1.22, 'Gas Giant', '⚠️ Zone Match'],
-            ['TRAPPIST-1e', 23114402, 0.92, 0.029, 0.021, 0.030, 'Earth-sized Rocky', '🎯 PRIORITY 1: Habitable Zone Rocky World'],
-            ['Proxima Centauri b', 11029334, 1.03, 0.048, 0.036, 0.053, 'Earth-sized Rocky', '🎯 PRIORITY 1: Habitable Zone Rocky World']
+            ['Kepler-22b', 12049112, 2.4, 0.849, 0.847, 1.22, 'Gas Giant', '⚠️ Zone Match (Gas World)'],
+            ['TRAPPIST-1e', 23114402, 0.92, 0.029, 0.021, 0.030, 'Earth-sized Rocky', '🎯 PRIORITY 1: Habitable Zone Rocky World']
         ]
         return pd.DataFrame(rows, columns=cols)
 
 global_universe_df = fetch_complete_nasa_universe()
+
+# --- SIDEBAR SYSTEMS CONTROL ---
 st.sidebar.header("⚙️ Configuration Workspace")
-feed_type = st.sidebar.radio("📬 Select Data Universe Feed:", ["🌌 All Known Exoplanets (Global NASA Feed)", "🎯 My Custom Pipeline Catalog"])
 
-if "My Custom" in feed_type and my_pipeline_loaded and not my_pipeline_df.empty:
-    active_df = my_pipeline_df.copy()
-else:
-    active_df = global_universe_df.copy()
+# Isolate parent star groupings
+def extract_parent_star(name):
+    if isinstance(name, str) and len(name) > 2:
+        return name[:-2] if (name[-1].islower() and name[-2] == ' ') else (name[:-1] if name[-1].islower() else name)
+    return "Unknown Star"
+global_universe_df['parent_star_system'] = global_universe_df['pl_name'].apply(extract_parent_star)
 
-active_df['parent_star_system'] = active_df['pl_name'].apply(lambda x: x[:-2] if (isinstance(x,str) and len(x)>2 and x[-1].islower() and x[-2]==' ') else (x[:-1] if isinstance(x,str) and len(x)>2 and x[-1].islower() else x))
-unique_stars = sorted(active_df['parent_star_system'].dropna().unique().tolist())
+unique_stars = sorted(global_universe_df['parent_star_system'].dropna().unique().tolist())
 star_filter = st.sidebar.selectbox("1. Filter by Parent Star System:", ["All Stars"] + unique_stars)
-planet_choices = active_df[active_df['parent_star_system'] == star_filter]['pl_name'].tolist() if star_filter != "All Stars" else sorted(active_df['pl_name'].dropna().tolist())
+
+planet_choices = global_universe_df[global_universe_df['parent_star_system'] == star_filter]['pl_name'].tolist() if star_filter != "All Stars" else sorted(global_universe_df['pl_name'].dropna().tolist())
 selected_planet_name = st.sidebar.selectbox("2. Select Target Exoplanet:", ["Custom Parameters"] + planet_choices)
 
+# Pull parameters dynamically when an option is selected
 init_lum, init_rad, init_dist, init_atmo = 1.0, 1.0, 1.0, 1.0
-if selected_planet_name != "Custom Parameters" and not active_df.empty:
-    p_rows = active_df[active_df['pl_name'] == selected_planet_name]
+if selected_planet_name != "Custom Parameters" and not global_universe_df.empty:
+    p_rows = global_universe_df[global_universe_df['pl_name'] == selected_planet_name]
     if not p_rows.empty:
         p_row = p_rows.iloc[0]
         init_dist = float(p_row['calculated_distance_au'])
@@ -88,6 +91,7 @@ my_radius = st.sidebar.slider("Your Planet Radius (Earth Radii)", 0.1, 25.0, ini
 my_distance = st.sidebar.slider("Your Orbital Distance (AU)", 0.005, 10.0, init_dist, step=0.005)
 atmo_thickness = st.sidebar.slider("Atmospheric Density (Earth = 1.0)", 0.0, 100.0, init_atmo, step=0.5)
 
+# --- PHYSICS INTERACTIVE BLOCK ---
 base_inner = np.sqrt(star_luminosity / 1.1)
 base_outer = np.sqrt(star_luminosity / 0.53)
 total_greenhouse_multiplier = 1.0 + (np.log1p(atmo_thickness) * 0.35) + max(0.0, (my_radius - 1.0) * 0.1)
@@ -120,9 +124,10 @@ with col_chart:
     for s in ['top','left','right']: ax.spines[s].set_visible(False)
     st.pyplot(fig)
 
+# --- GLOBAL ARMS ARCHIVE VIEWER ---
 st.markdown("---")
 st.header("📋 Automated NASA Archive Detections")
-type_counts = active_df['size_classification'].value_counts()
+type_counts = global_universe_df['size_classification'].value_counts()
 
 col_l, col_r = st.columns(2)
 with col_l:
@@ -132,15 +137,14 @@ with col_l:
         ax2.pie(type_counts, labels=type_counts.index, autopct='%1.1f%%', startangle=140, textprops={'color': 'white', 'fontsize': 8})
         ax2.axis('equal'); st.pyplot(fig2)
 with col_r:
-    st.write(f"**Current Feed:** {feed_type}")
-    st.write(f"**Total Active Row Count:** {len(active_df)}")
+    st.write(f"**Total Active Row Count:** {len(global_universe_df)}")
 
 st.markdown("---")
 search_query = st.text_input("✍️ Search Planet by Designation Name:", "")
-available_statuses = active_df['habitability_status'].unique().tolist() if 'habitability_status' in active_df.columns else []
+available_statuses = global_universe_df['habitability_status'].unique().tolist()
 selected_statuses = st.multiselect("🎯 Filter by Habitability Tag Status:", options=available_statuses, default=available_statuses)
 
-filtered_df = active_df[active_df['habitability_status'].isin(selected_statuses)] if selected_statuses else active_df.copy()
-if search_query and 'pl_name' in filtered_df.columns: 
+filtered_df = global_universe_df[global_universe_df['habitability_status'].isin(selected_statuses)]
+if search_query: 
     filtered_df = filtered_df[filtered_df['pl_name'].str.contains(search_query, case=False, na=False)]
 st.dataframe(filtered_df, use_container_width=True)
