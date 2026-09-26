@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 
 # Page configuration
 st.set_page_config(page_title="Exoplanet Characterisation Dashboard", layout="wide")
@@ -52,11 +53,48 @@ else:
 st.info(f"**Boundary Readout:** For a star with {star_luminosity}x Sun's luminosity, the Habitable Zone sits between **{hz_inner:.2f} AU** and **{hz_outer:.2f} AU**.")
 st.markdown(f"### Current Planet Status: :{status_color}[{status_text}]")
 
-# Display diagnostic metrics side by side
-col_m1, col_m2, col_m3 = st.columns(3)
-col_m1.metric("Planet Type", size_class)
-col_m2.metric("Your Chosen Distance", f"{my_distance:.2f} AU")
-col_m3.metric("Zone Placement", "Habitable" if (hz_inner <= my_distance <= hz_outer) else "Inhabitable")
+# Layout with Text metrics on the left, Visual chart on the right
+col_metrics, col_chart = st.columns([1, 2])
+
+with col_metrics:
+    st.markdown("#### System Telemetry")
+    st.metric("Planet Type", size_class)
+    st.metric("Your Chosen Distance", f"{my_distance:.2f} AU")
+    st.metric("Zone Placement", "Habitable" if (hz_inner <= my_distance <= hz_outer) else "Inhabitable")
+
+with col_chart:
+    st.markdown("#### Orbital Profile Map")
+    
+    # Generate the Matplotlib Visualisation
+    fig, ax = plt.subplots(figsize=(6, 2.5))
+    fig.patch.set_facecolor('#0e1117') # Match Streamlit dark background
+    ax.set_facecolor('#0e1117')
+    
+    # Draw the Host Star at coordinate (0,0)
+    # Star size scales slightly with luminosity input
+    star_size = 100 + (star_luminosity * 20)
+    ax.scatter(0, 0, s=star_size, color='#f9d71c', edgecolors='#ffaa00', label='Host Star', zorder=5)
+    
+    # Draw the Habitable Zone boundary ring shaded region
+    ax.axvspan(hz_inner, hz_outer, color='#2ea44f', alpha=0.3, label='Habitable Zone')
+    
+    # Plot your user-controlled planet position
+    planet_color = '#1f77b4' if size_class != "Gas/Ice Giant" else '#ff7f0e'
+    ax.scatter(my_distance, 0, s=60, color=planet_color, edgecolors='white', label='Your Planet', zorder=6)
+    
+    # Format the chart axis structure
+    ax.set_xlim(-0.1, 3.2)
+    ax.set_ylim(-0.5, 0.5)
+    ax.get_yaxis().set_visible(False) # Hide y-axis since it's a 1D distance cross-section
+    ax.spines['top'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['bottom'].set_color('#ffffff')
+    ax.tick_params(colors='white')
+    ax.set_xlabel('Distance from Star (Astronomical Units - AU)', color='white', fontsize=9)
+    ax.legend(loc='upper right', facecolor='#1e222b', edgecolor='none', labelcolor='white', fontsize=8)
+    
+    st.pyplot(fig)
 
 st.markdown("---")
 
