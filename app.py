@@ -63,3 +63,6 @@ if selected_planet_name != "Custom Parameters" and not active_df.empty:
     init_rad = float(p_row['pl_rade'])
     init_lum = float((p_row['hz_inner_edge_au']**2) * 1.1)
     init_atmo = 90.0 if "Gas" in str(p_row['size_classification']) else (50.0 if "Neptunian" in str(p_row['size_classification']) else 1.0)
+    # Append this single line to the very bottom of your app.py file
+import app_plots; app_plots.render_plots_and_tables(star_luminosity, my_radius, my_distance, atmo_thickness, active_df, feed_type)
+
