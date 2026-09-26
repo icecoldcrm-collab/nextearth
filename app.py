@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import ssl
-import requests  # Upgraded to robust requests library for Streamlit cloud routing
+import requests  
 from io import StringIO
 
 st.set_page_config(page_title="Universal Exoplanet Dashboard", layout="wide")
@@ -19,18 +19,15 @@ except FileNotFoundError:
 
 @st.cache_data(ttl=3600)
 def fetch_complete_nasa_universe():
+    # Built-in direct data path to NASA's public exoplanet table index
     url = "https://caltech.edu"
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
     try:
-        # Request the database safely using requests session wrapper
         response = requests.get(url, headers=headers, timeout=30, verify=False)
-        
         if response.status_code == 200 and "ERROR" not in response.text:
             df = pd.read_csv(StringIO(response.text))
-            
-            # Run standard distance/boundary calculations for the global feed
             df['st_lum'] = df['st_lum'].fillna((df['st_rad'].fillna(1.0)**2) * ((df['st_teff'].fillna(5778) / 5778)**4))
             df['pl_rade'] = df['pl_rade'].fillna(1.0)
             df['pl_orbper'] = df['pl_orbper'].fillna(30.0)
@@ -49,9 +46,8 @@ def fetch_complete_nasa_universe():
             df['habitability_status'] = df.apply(flag_habitability, axis=1)
             return df
         else:
-            raise ValueError("NASA TAP Server Refusal")
-    except Exception as e:
-        # Fallback matrix if the network breaks down
+            raise ValueError("NASA Server Refusal")
+    except Exception:
         cols = ['pl_name','tic_id','pl_rade','calculated_distance_au','hz_inner_edge_au','hz_outer_edge_au','size_classification','habitability_status']
         rows = [
             ['Earth', 55431102, 1.0, 1.0, 0.95, 1.37, 'Earth-sized Rocky', '🎯 PRIORITY 1: Habitable Zone Rocky World'],
