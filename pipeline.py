@@ -17,75 +17,70 @@ def run_exoplanet_discovery_pipeline(output_filename="habitable_candidates.csv")
         df = pd.read_csv(url, storage_options={"ssl": ssl_context})
         print(f"📥 Telemetry Online! Successfully loaded {len(df)} records from NASA.")
     except Exception as e:
-        print(f"❌ Connection bottleneck: {e}. Switching to calibrated fallback matrix...")
-        # FULLY POPULATED fallback simulated dataset to prevent syntax crashes
-        mock_data = {
-            'pl_name': ['Alpha-Centauri-b', 'Kepler-22b-Proxy', 'Proxima-Centauri-d'],
-            'tic_id':,
-            'pl_orbper': [12.4, 289.5, 3.2],      # Orbital days
-            'pl_rade': [0.95, 2.4, 0.71],         # Known Planet Radii
-            'st_teff':,        # Host Star Temperature (Kelvin)
-            'st_rad': [1.0, 0.979, 0.14],         # Solar Radii
-            'st_lum': [1.0, 0.79, 0.0015]         # Solar Luminosity (Relative to Sun)
-        }
-        df = pd.DataFrame(mock_data)
+        print(f"❌ Connection bottleneck: {e}. Generating clean backup data matrix.")
+        # Super simple, break-proof backup frame without nested syntax dict errors
+        df = pd.DataFrame(columns=['pl_name', 'tic_id', 'pl_rade', 'pl_orbper', 'st_teff', 'st_rad', 'st_lum'])
 
     print("🧠 Running Analytics Engine & Habitability Processing Vectors...")
 
     # Fill in missing parameters with standard mathematical assumptions to avoid calculation breaks
-    df['st_lum'] = df['st_lum'].fillna((df['st_rad']**2) * ((df['st_teff'] / 5778)**4))
+    df['st_lum'] = df['st_lum'].fillna((df['st_rad'].fillna(1.0)**2) * ((df['st_teff'].fillna(5778) / 5778)**4))
     df['pl_rade'] = df['pl_rade'].fillna(1.0)
     df['pl_orbper'] = df['pl_orbper'].fillna(30.0)
     df['st_rad'] = df['st_rad'].fillna(1.0)
 
-    # 1. Calculate Semi-Major Axis (Orbital Distance 'a' in Astronomical Units) via Kepler's Third Law
-    df['calculated_distance_au'] = ((df['pl_orbper'] / 365.25)**2 * df['st_rad'])**(1/3)
-    
-    # 2. Dynamic Goldilocks Zone Boundaries Calculation scaled to individual stellar absolute luminosity (L)
-    df['hz_inner_edge_au'] = np.sqrt(df['st_lum'] / 1.1)
-    df['hz_outer_edge_au'] = np.sqrt(df['st_lum'] / 0.53)
-    
-    # 3. Size Classification Logic
-    def classify_size(row):
-        r = row['pl_rade']
-        if r <= 0.8: return "Sub-Earth"
-        elif 0.8 < r <= 1.25: return "Earth-sized Rocky"
-        elif 1.25 < r <= 2.0: return "Super-Earth"
-        elif 2.0 < r <= 6.0: return "Neptunian"
-        else: return "Gas Giant"
-
-    df['size_classification'] = df.apply(classify_size, axis=1)
-
-    # 4. Habitability Verification Algorithm
-    def flag_habitability(row):
-        dist = row['calculated_distance_au']
-        inner = row['hz_inner_edge_au']
-        outer = row['hz_outer_edge_au']
-        is_rocky = row['size_classification'] in ["Earth-sized Rocky", "Super-Earth"]
+    # If the frame has data, run the physics matrices
+    if not df.empty:
+        # 1. Calculate Semi-Major Axis (Orbital Distance 'a' in Astronomical Units) via Kepler's Third Law
+        df['calculated_distance_au'] = ((df['pl_orbper'] / 365.25)**2 * df['st_rad'])**(1/3)
         
-        if (inner <= dist <= outer) and is_rocky:
-            return "🎯 PRIORITY 1: Habitable Zone Rocky World"
-        elif (inner <= dist <= outer):
-            return "⚠️ Zone Match (Gas Giant / Ice World)"
-        else:
-            return "❌ Outside Habitable Zone"
+        # 2. Dynamic Goldilocks Zone Boundaries Calculation scaled to individual stellar absolute luminosity (L)
+        df['hz_inner_edge_au'] = np.sqrt(df['st_lum'] / 1.1)
+        df['hz_outer_edge_au'] = np.sqrt(df['st_lum'] / 0.53)
+        
+        # 3. Size Classification Logic
+        def classify_size(row):
+            r = row['pl_rade']
+            if r <= 0.8: return "Sub-Earth"
+            elif 0.8 < r <= 1.25: return "Earth-sized Rocky"
+            elif 1.25 < r <= 2.0: return "Super-Earth"
+            elif 2.0 < r <= 6.0: return "Neptunian"
+            else: return "Gas Giant"
 
-    df['habitability_status'] = df.apply(flag_habitability, axis=1)
+        df['size_classification'] = df.apply(classify_size, axis=1)
 
-    # 5. Extract and Sort Priority Targets for IAU/Academic Review File Schema
-    final_export = df[df['habitability_status'].str.contains("PRIORITY 1")].copy()
-    
+        # 4. Habitability Verification Algorithm
+        def flag_habitability(row):
+            dist = row['calculated_distance_au']
+            inner = row['hz_inner_edge_au']
+            outer = row['hz_outer_edge_au']
+            is_rocky = row['size_classification'] in ["Earth-sized Rocky", "Super-Earth"]
+            
+            if (inner <= dist <= outer) and is_rocky:
+                return "🎯 PRIORITY 1: Habitable Zone Rocky World"
+            elif (inner <= dist <= outer):
+                return "⚠️ Zone Match (Gas Giant / Ice World)"
+            else:
+                return "❌ Outside Habitable Zone"
+
+        df['habitability_status'] = df.apply(flag_habitability, axis=1)
+
+        # 5. Extract and Sort Priority Targets for IAU/Academic Review File Schema
+        final_export = df[df['habitability_status'].str.contains("PRIORITY 1")].copy()
+    else:
+        final_export = pd.DataFrame()
+
+    # Re-verify columns are present
     output_columns = [
         'pl_name', 'tic_id', 'pl_rade', 'size_classification',
         'calculated_distance_au', 'hz_inner_edge_au', 'hz_outer_edge_au', 'habitability_status'
     ]
     
-    # Check if empty, and default back to entire list for visualization mapping if data is small
     if final_export.empty:
-        final_export = df.copy()
-        
-    # Clean export table format
-    final_export = final_export[output_columns].sort_values(by='pl_rade')
+        # Create an empty template file so the frontend app doesn't crash if NASA is offline
+        final_export = pd.DataFrame(columns=output_columns)
+    else:
+        final_export = final_export[output_columns].sort_values(by='pl_rade')
 
     # 6. Standardized CSV File Output Execution
     final_export.to_csv(output_filename, index=False)
