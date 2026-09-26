@@ -18,7 +18,6 @@ def run_exoplanet_discovery_pipeline(output_filename="habitable_candidates.csv")
         print(f"📥 Telemetry Online! Successfully loaded {len(df)} records from NASA.")
     except Exception as e:
         print(f"❌ Connection bottleneck: {e}. Generating clean backup data matrix.")
-        # Super simple, break-proof backup frame without nested syntax dict errors
         df = pd.DataFrame(columns=['pl_name', 'tic_id', 'pl_rade', 'pl_orbper', 'st_teff', 'st_rad', 'st_lum'])
 
     print("🧠 Running Analytics Engine & Habitability Processing Vectors...")
@@ -49,7 +48,7 @@ def run_exoplanet_discovery_pipeline(output_filename="habitable_candidates.csv")
 
         df['size_classification'] = df.apply(classify_size, axis=1)
 
-        # 4. Habitability Verification Algorithm
+        # 4. Habitability Verification Algorithm (FLAGS but DOES NOT filter out systems)
         def flag_habitability(row):
             dist = row['calculated_distance_au']
             inner = row['hz_inner_edge_au']
@@ -65,26 +64,31 @@ def run_exoplanet_discovery_pipeline(output_filename="habitable_candidates.csv")
 
         df['habitability_status'] = df.apply(flag_habitability, axis=1)
 
-        # 5. Extract and Sort Priority Targets for IAU/Academic Review File Schema
-        final_export = df[df['habitability_status'].str.contains("PRIORITY 1")].copy()
+        # 🪐 CHANGE: Keep ALL planets instead of slicing the dataframe for PRIORITY 1 only
+        final_export = df.copy()
     else:
         final_export = pd.DataFrame()
 
-    # Re-verify columns are present
     output_columns = [
         'pl_name', 'tic_id', 'pl_rade', 'size_classification',
         'calculated_distance_au', 'hz_inner_edge_au', 'hz_outer_edge_au', 'habitability_status'
     ]
     
     if final_export.empty:
-        # Create an empty template file so the frontend app doesn't crash if NASA is offline
         final_export = pd.DataFrame(columns=output_columns)
     else:
-        final_export = final_export[output_columns].sort_values(by='pl_rade')
+        final_export = final_export[output_columns]
+        
+        # Sort so that the high-priority targets bubble up to the top rows automatically
+        # Custom sorting logic to ensure Priority 1 worlds appear first
+        final_export['sort_priority'] = final_export['habitability_status'].apply(
+            lambda x: 0 if "🎯" in x else (1 if "⚠️" in x else 2)
+        )
+        final_export = final_export.sort_values(by=['sort_priority', 'pl_name']).drop(columns=['sort_priority'])
 
     # 6. Standardized CSV File Output Execution
     final_export.to_csv(output_filename, index=False)
-    print(f"💾 Pipeline Execution Successful! Catalogued {len(final_export)} total habitable candidates.")
+    print(f"💾 Pipeline Execution Successful! Catalogued {len(final_export)} total worlds.")
     print(f"📂 Output generated: '{os.path.abspath(output_filename)}'")
     
     return final_export
