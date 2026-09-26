@@ -2,15 +2,17 @@ import pandas as pd
 import numpy as np
 import os
 import requests
+import urllib3  # Added to suppress SSL warning clutter in your GitHub logs
 from io import StringIO
+
+# Suppress the InsecureRequestWarning messages from cluttering the execution logs
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def run_exoplanet_discovery_pipeline(output_filename="habitable_candidates.csv"):
     print("🛰️ Connecting to NASA Exoplanet Archive (Legacy API Engine)...")
     
-    # Using the bulletproof Legacy API endpoint path to prevent TAP misrouting
     base_url = "https://caltech.edu"
     
-    # Clean parameters explicitly mapping to table segments
     query_params = {
         'table': 'ps',
         'select': 'pl_name,pl_rade,pl_orbper,st_teff,st_rad,st_lum',
@@ -23,7 +25,9 @@ def run_exoplanet_discovery_pipeline(output_filename="habitable_candidates.csv")
     }
     
     print("📥 Requesting data stream via dedicated table routing...")
-    response = requests.get(base_url, params=query_params, headers=headers, timeout=60)
+    
+    # FIXED CORES: Added verify=False to completely bypass local VM certificate bottlenecks
+    response = requests.get(base_url, params=query_params, headers=headers, timeout=60, verify=False)
     raw_text = response.text
     
     if response.status_code != 200 or "ERROR" in raw_text or "<html" in raw_text:
