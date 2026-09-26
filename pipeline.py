@@ -1,18 +1,20 @@
 import pandas as pd
 import numpy as np
 import os
-import requests  # Upgraded to handle parameter encoding and session routing securely
+import requests
 from io import StringIO
 
 def run_exoplanet_discovery_pipeline(output_filename="habitable_candidates.csv"):
-    print("🛰️ Connecting to NASA Exoplanet Archive (Live API Engine)...")
+    print("🛰️ Connecting to NASA Exoplanet Archive (Legacy API Engine)...")
     
-    # Base API endpoint without manual encoding strings attached
+    # Using the bulletproof Legacy API endpoint path to prevent TAP misrouting
     base_url = "https://caltech.edu"
     
-    # Pass parameters as a clean Python dictionary. 'requests' will encode this safely.
+    # Clean parameters explicitly mapping to table segments
     query_params = {
-        'query': 'select pl_name, pl_rade, pl_orbper, st_teff, st_rad, st_lum from ps where default_flag=1',
+        'table': 'ps',
+        'select': 'pl_name,pl_rade,pl_orbper,st_teff,st_rad,st_lum',
+        'where': 'default_flag=1',
         'format': 'csv'
     }
     
@@ -20,18 +22,14 @@ def run_exoplanet_discovery_pipeline(output_filename="habitable_candidates.csv")
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
     
-    print("📥 Opening live data stream link with secure parameter maps...")
-    
-    # Execute the request with automated encoding parameters and SSL verification bypass
-    response = requests.get(base_url, params=query_params, headers=headers, timeout=60, verify=False)
+    print("📥 Requesting data stream via dedicated table routing...")
+    response = requests.get(base_url, params=query_params, headers=headers, timeout=60)
     raw_text = response.text
     
-    # Intercept checks to catch HTML redirects or server error payloads immediately
     if response.status_code != 200 or "ERROR" in raw_text or "<html" in raw_text:
-        print(f"❌ Server rejected request. Status Code: {response.status_code}")
-        print("Inspecting returned server payload response:")
+        print(f"❌ Connection Refused. Status: {response.status_code}")
         print(raw_text[:400])
-        raise RuntimeError("NASA API request rejected or misrouted to host homepage.")
+        raise RuntimeError("Data stream request rejected by the archive host.")
         
     df = pd.read_csv(StringIO(raw_text))
     print(f"📥 Telemetry Online! Successfully loaded {len(df)} live records from NASA.")
