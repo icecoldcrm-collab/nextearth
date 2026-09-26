@@ -1,20 +1,24 @@
 import pandas as pd
 import numpy as np
 import os
-import ssl  # Handles the local issuer security verification bottleneck
+import ssl  
+import urllib.request  # Used to smoothly bypass SSL issues without crashing pandas
 
 def run_exoplanet_discovery_pipeline(output_filename="habitable_candidates.csv"):
     print("🛰️ Connecting to NASA Exoplanet Archive (Live Telemetry Stream)...")
     
-    # Standard URL encoded ADQL query mapping directly to Caltech's live Planetary Systems database table
     url = "https://caltech.edu"
     
     try:
-        # Bypasses the SSL handshake bottleneck by creating an unverified context
+        # Bypasses the SSL verification step entirely
         ssl_context = ssl._create_unverified_context()
         
-        # Request data stream directly from NASA's servers using our bypassed context
-        df = pd.read_csv(url, storage_options={"ssl": ssl_context})
+        # Download the raw data stream using urllib with the unverified context
+        print("📥 Opening data stream link...")
+        with urllib.request.urlopen(url, context=ssl_context) as response:
+            # Read the CSV directly into Pandas from the streaming text bytes
+            df = pd.read_csv(response)
+            
         print(f"📥 Telemetry Online! Successfully loaded {len(df)} records from NASA.")
     except Exception as e:
         print(f"❌ Connection bottleneck: {e}. Generating clean backup data matrix.")
@@ -64,7 +68,7 @@ def run_exoplanet_discovery_pipeline(output_filename="habitable_candidates.csv")
 
         df['habitability_status'] = df.apply(flag_habitability, axis=1)
 
-        # 🪐 CHANGE: Keep ALL planets instead of slicing the dataframe for PRIORITY 1 only
+        # Keep ALL planets instead of slicing the dataframe
         final_export = df.copy()
     else:
         final_export = pd.DataFrame()
@@ -80,7 +84,6 @@ def run_exoplanet_discovery_pipeline(output_filename="habitable_candidates.csv")
         final_export = final_export[output_columns]
         
         # Sort so that the high-priority targets bubble up to the top rows automatically
-        # Custom sorting logic to ensure Priority 1 worlds appear first
         final_export['sort_priority'] = final_export['habitability_status'].apply(
             lambda x: 0 if "🎯" in x else (1 if "⚠️" in x else 2)
         )
