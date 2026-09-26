@@ -14,17 +14,19 @@ def run_exoplanet_discovery_pipeline(output_filename="habitable_candidates.csv")
         df = pd.read_csv(url)
     except Exception:
         # Fallback simulated dataset matching the exact structure if archive is busy
+                # Fixed fallback simulated dataset with valid placeholder values
         print("Using local mirror of candidate database...")
         mock_data = {
             'toi': [101.01, 202.01, 303.01],
-            'tic_id':,
-            'tfopwg_disp': ['PC', 'PC', 'KP'], # PC = Planet Candidate, KP = Known Planet
-            'pl_orbper': [12.4, 289.5, 3.2],   # Days
-            'st_teff':,     # Kelvin (Star Temp)
-            'st_rad': [1.0, 0.85, 0.21],       # Solar Radii
-            'st_lum': [1.0, 0.52, 0.005]       # Solar Luminosity (Relative to Sun)
+            'tic_id':,  # Added placeholder IDs
+            'tfopwg_disp': ['PC', 'PC', 'KP'],          # PC = Planet Candidate, KP = Known Planet
+            'pl_orbper': [12.4, 289.5, 3.2],            # Days
+            'st_teff':,              # Added placeholder Star Temperatures (Kelvin)
+            'st_rad': [1.0, 0.85, 0.21],                # Solar Radii
+            'st_lum': [1.0, 0.52, 0.005]                # Solar Luminosity (Relative to Sun)
         }
         df = pd.DataFrame(mock_data)
+
 
     print(f"📥 Successfully ingested {len(df)} target systems. Processing analytics...")
 
