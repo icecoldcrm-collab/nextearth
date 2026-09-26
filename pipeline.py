@@ -18,7 +18,7 @@ def run_exoplanet_discovery_pipeline(output_filename="habitable_candidates.csv")
         print(f"📥 Telemetry Online! Successfully loaded {len(df)} records from NASA.")
     except Exception as e:
         print(f"❌ Connection bottleneck: {e}. Switching to calibrated fallback matrix...")
-        # Fixed fallback simulated dataset with valid placeholder values matching database structure
+        # FULLY POPULATED fallback simulated dataset to prevent syntax crashes
         mock_data = {
             'pl_name': ['Alpha-Centauri-b', 'Kepler-22b-Proxy', 'Proxima-Centauri-d'],
             'tic_id':,
@@ -39,11 +39,9 @@ def run_exoplanet_discovery_pipeline(output_filename="habitable_candidates.csv")
     df['st_rad'] = df['st_rad'].fillna(1.0)
 
     # 1. Calculate Semi-Major Axis (Orbital Distance 'a' in Astronomical Units) via Kepler's Third Law
-    # a = (Period_years^2 * Mass_star_solar)^(1/3). Approximated stellar mass using stellar radius boundary
     df['calculated_distance_au'] = ((df['pl_orbper'] / 365.25)**2 * df['st_rad'])**(1/3)
     
     # 2. Dynamic Goldilocks Zone Boundaries Calculation scaled to individual stellar absolute luminosity (L)
-    # Conservative inner boundary (~0.95 AU for Earth) and outer boundary (~1.67 AU for Earth)
     df['hz_inner_edge_au'] = np.sqrt(df['st_lum'] / 1.1)
     df['hz_outer_edge_au'] = np.sqrt(df['st_lum'] / 0.53)
     
@@ -65,7 +63,6 @@ def run_exoplanet_discovery_pipeline(output_filename="habitable_candidates.csv")
         outer = row['hz_outer_edge_au']
         is_rocky = row['size_classification'] in ["Earth-sized Rocky", "Super-Earth"]
         
-        # Verify if coordinates sit perfectly inside the stable liquid-water boundary
         if (inner <= dist <= outer) and is_rocky:
             return "🎯 PRIORITY 1: Habitable Zone Rocky World"
         elif (inner <= dist <= outer):
@@ -83,6 +80,10 @@ def run_exoplanet_discovery_pipeline(output_filename="habitable_candidates.csv")
         'calculated_distance_au', 'hz_inner_edge_au', 'hz_outer_edge_au', 'habitability_status'
     ]
     
+    # Check if empty, and default back to entire list for visualization mapping if data is small
+    if final_export.empty:
+        final_export = df.copy()
+        
     # Clean export table format
     final_export = final_export[output_columns].sort_values(by='pl_rade')
 
