@@ -73,7 +73,7 @@ else:
 st.info(f"🧬 **Dynamic Environmental Readout:** Due to this planet's physical properties, its specific liquid-water envelope has shifted to **{hz_inner:.2f} AU – {hz_outer:.2f} AU** (Base Stellar Zone was {base_inner:.2f} – {base_outer:.2f} AU).")
 st.markdown(f"### Current Planet Status: :{status_color}[{status_text}]")
 
-col_metrics, col_chart = st.columns()
+col_metrics, col_chart = st.columns(2)
 
 with col_metrics:
     st.markdown("#### System Telemetry")
