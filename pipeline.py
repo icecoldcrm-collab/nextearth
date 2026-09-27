@@ -13,17 +13,16 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def fetch_live_unidentified_stream(limit=3):
     """
-    Connects directly to the NASA Exoplanet Archive TAP service and harvests 
-    live, recent TESS Objects of Interest (TOIs) from the active registry.
+    Harvests live TOI targets along with rigorous stellar parameters directly 
+    from the NASA Exoplanet Archive TAP registry, discarding incomplete entries.
     """
-    print("🛰️ Harvesting Live Unclassified Stream from NASA Exoplanet Archive TAP API...")
+    print("🛰️ Harvesting Live Stream & Verified Stellar Parameters from NASA Exoplanet Archive...")
     
-    # Official NASA Exoplanet Archive TAP sync endpoint
     url = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
     
-    # Query the official TESS Objects of Interest (TOI) table using valid column 'tid'
+    # Query tid along with cataloged stellar radius and effective temperature
     params = {
-        'query': "select top 50 tid from toi order by toi desc",
+        'query': "select top 50 tid, st_rad, st_teff from toi order by toi desc",
         'format': 'csv'
     }
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -38,30 +37,43 @@ def fetch_live_unidentified_stream(limit=3):
             else:
                 df_stream['target_id'] = "TIC " + df_stream.iloc[:, 0].astype(str)
                 
-            unique_targets = df_stream['target_id'].dropna().unique()[:limit].tolist()
-            print(f"📥 Successfully isolated {len(unique_targets)} live systems from NASA: {unique_targets}")
-            return unique_targets
+            # Drop rows where crucial stellar parameters are missing to preserve scientific integrity
+            df_stream = df_stream.dropna(subset=['st_rad', 'st_teff'])
+            
+            valid_targets = []
+            for _, row in df_stream.head(limit).iterrows():
+                valid_targets.append({
+                    'target_id': row['target_id'],
+                    'catalog_radius': float(row['st_rad']),
+                    'catalog_teff': float(row['st_teff'])
+                })
+                
+            print(f"📥 Successfully isolated {len(valid_targets)} rigorously vetted systems from NASA.")
+            return valid_targets
         else:
-            print(f"⚠️ NASA TAP API responded with error text: {response.text[:150]}")
+            print(f"⚠️ NASA TAP API error: {response.text[:150]}")
     except Exception as e:
         print(f"⚠️ API connection exception: {e}")
     
-    # Minimal safety fallback only if network completely drops
-    return ["TIC 307210830"]
+    return []
 
-def analyze_raw_star_light_chart(star_id):
+def analyze_raw_star_light_chart(target_info):
     """
     Downloads raw starlight telemetry charts from MAST, tests for hidden planet footprints,
-    and packages data for potential ExoFOP submission.
+    and calculates accurate vectors using rigorously verified host star parameters.
     """
-    print(f"\n✨ Initiating Automated Signal Sweep on Target: {star_id}")
+    star_id = target_info['target_id']
+    star_radius = target_info['catalog_radius']
+    star_teff = target_info['catalog_teff']
+    
+    print(f"\n✨ Initiating Automated Signal Sweep on Target: {star_id} (Radius: {star_radius} R☉, Teff: {star_teff}K)")
     ssl._create_default_https_context = ssl._create_unverified_context
     
     try:
         search_result = lk.search_lightcurve(star_id)
             
         if len(search_result) == 0:
-            print(f"📋 Skipping {star_id}: Light charts currently restricted, offline, or non-existent in MAST.")
+            print(f"📋 Skipping {star_id}: Light charts currently restricted or missing in MAST.")
             return None
             
         lc_collection = search_result[:1].download_all()
@@ -78,15 +90,13 @@ def analyze_raw_star_light_chart(star_id):
         print(f"🧠 Analysis Finished! Signal-to-Noise Ratio (SNR): {results.snr:.2f}")
         
         if results.snr >= 6.0:
-            print(f"🎯 PLANET SIGNAL CONFIRMED! Extracting physical vectors...")
+            print(f"🎯 PLANET SIGNAL CONFIRMED! Calculating precise physical vectors...")
             
             period_days = results.period
             transit_depth = 1.0 - results.depth
             
-            star_radius = getattr(lc, 'meta', {}).get('RADIUS', 1.0)
-            star_teff = getattr(lc, 'meta', {}).get('TEFF', 5778)
+            # Precise physical calculations using verified TAP parameters
             star_luminosity = (star_radius**2) * ((star_teff / 5778)**4)
-            
             calculated_distance_au = ((period_days / 365.25)**2 * star_radius)**(1/3)
             planet_radius_earth = star_radius * np.sqrt(transit_depth) * 109.2
             
@@ -129,8 +139,8 @@ Habitable Status  : {status}
 
 Methodology Notes:
 Signal extracted via Transit Least Squares (TLS) matching on 
-binned space telescope telemetry arrays. Detrending applied 
-via a window-length 401 flatten array filter matrix.
+binned space telescope telemetry arrays. Stellar parameters 
+verified via NASA Exoplanet Archive TAP registry.
 ======================================================="""
             
             report_filename = f"exofop_submission_{clean_id}.txt"
@@ -168,8 +178,8 @@ via a window-length 401 flatten array filter matrix.
                 'hz_outer_edge_au': round(hz_outer, 3),
                 'habitability_status': status,
                 'observer_notes': notes,
-                'star_teff': round(float(star_teff), 1),
-                'star_radius': round(float(star_radius), 2)
+                'star_teff': round(star_teff, 1),
+                'star_radius': round(star_radius, 2)
             }
         else:
             print("❌ Signal validation pass failed: Dip profiles match background solar noise.")
@@ -191,8 +201,8 @@ if __name__ == "__main__":
     targets_pool = fetch_live_unidentified_stream(limit=batch_limit)
     new_logs = []
     
-    for target_id in targets_pool:
-        candidate_data = analyze_raw_star_light_chart(target_id)
+    for target_info in targets_pool:
+        candidate_data = analyze_raw_star_light_chart(target_info)
         if candidate_data:
             new_logs.append(candidate_data)
             
