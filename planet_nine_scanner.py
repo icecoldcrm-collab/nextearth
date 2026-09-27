@@ -17,7 +17,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 def fetch_epoch_data(catalog_table, max_rows=150):
     """
     Queries an infrared catalog table from the NASA IRSA TAP service 
-    with built-in retry logic and extended timeout protection.
+    with built-in retry logic and correct table schema references.
     """
     print(f"🛰️ Querying NASA IRSA TAP for catalog: {catalog_table}...")
     url = "https://irsa.ipac.caltech.edu/TAP/sync"
@@ -36,7 +36,7 @@ def fetch_epoch_data(catalog_table, max_rows=150):
     for attempt in range(3):
         try:
             response = requests.get(url, params=params, headers=headers, timeout=60, verify=False)
-            if response.status_code == 200 and "ERROR" not in response.text.upper():
+            if response.status_code == 200 and "ERROR" not in response.text.upper() and "<html" not in response.text.lower() and "<votable" not in response.text.lower():
                 df = pd.read_csv(StringIO(response.text))
                 print(f"📥 Retrieved {len(df)} records from {catalog_table}.")
                 return df
@@ -105,9 +105,9 @@ def detect_moving_candidates():
     Cross-matches coordinates between epochs to find objects with significant sky drift
     and generates telemetry output and maps.
     """
-    # Epoch 1: AllWISE baseline & Epoch 2: NEOWISE Reactivation baseline
+    # Epoch 1: AllWISE baseline & Epoch 2: NEOWISE Reactivation baseline (neowiser_p1bs_psd)
     df_epoch1 = fetch_epoch_data('allwise_p3as_psd', max_rows=150)
-    df_epoch2 = fetch_epoch_data('neowise_p1bs_psd', max_rows=150)
+    df_epoch2 = fetch_epoch_data('neowiser_p1bs_psd', max_rows=150)
     
     if df_epoch1.empty or df_epoch2.empty:
         print("❌ Insufficient data returned from one or more epochs.")
