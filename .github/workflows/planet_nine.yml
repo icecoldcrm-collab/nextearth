@@ -2,9 +2,8 @@ name: Planet Nine Motion Detection Pipeline
 
 on:
   schedule:
-    - cron: '0 0 * * *' # Runs daily, adjust as needed
-  workflow_dispatch: # Allows manual triggering from the GitHub Actions tab
-
+    - cron: '0,15 * * * *' # Runs at minute 0 and 30 of every hour
+  workflow_dispatch:
 permissions:
   contents: write
 
