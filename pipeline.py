@@ -13,28 +13,40 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def fetch_live_unidentified_stream(limit=3):
     """
-    Connects to the NASA ExoFOP database and harvests a batch of the most recent,
+    Connects to the NASA Exoplanet Archive database and harvests a batch of the most recent,
     unconfirmed Threshold Crossing Events (TCEs) / TESS Input Catalog (TIC) IDs.
     """
-    print("🛰️ Harvesting Live Unclassified Stream from NASA ExoFOP Registry...")
-    url = "https://caltech.edu"
+    print("🛰️ Harvesting Live Unclassified Stream from NASA Registry...")
+    
+    # FIXED: Pointing to the official NASA Exoplanet Archive TAP sync endpoint instead of a base domain
+    url = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
+    
+    # Adjusting query for the official TAP interface (pulling from the standard TCE tables)
     params = {
-        'query': 'select top 100 tic_id, toi from tce where tce_disp=\'PC\' order by rowupdate desc',
+        'query': "select top 100 ticid from q1_q17_dr25_tce where tce_prad > 0 order by tce_time0bk desc",
         'format': 'csv'
     }
     headers = {'User-Agent': 'Mozilla/5.0'}
     
     try:
         response = requests.get(url, params=params, headers=headers, timeout=30, verify=False)
-        if response.status_code == 200 and "ERROR" not in response.text:
+        if response.status_code == 200 and "ERROR" not in response.text.upper():
             df_stream = pd.read_csv(StringIO(response.text))
-            df_stream['target_id'] = "TIC " + df_stream['tic_id'].astype(str)
+            
+            # TAP endpoint column names might be lowercase depending on the table
+            if 'ticid' in df_stream.columns:
+                df_stream['target_id'] = "TIC " + df_stream['ticid'].astype(str)
+            else:
+                # Fallback if standard column mapping misses
+                df_stream['target_id'] = "TIC " + df_stream.iloc[:, 0].astype(str)
+                
             unique_targets = df_stream['target_id'].unique()[:limit].tolist()
             print(f"📥 Successfully isolated {len(unique_targets)} new unverified systems for audit: {unique_targets}")
             return unique_targets
     except Exception as e:
-        print(f"⚠️ ExoFOP connection timed out: {e}. Utilizing calibrated fallback target queue.")
+        print(f"⚠️ API connection timed out or failed parsing: {e}. Utilizing calibrated fallback target queue.")
     
+    # Fallback TICs known to have good tutorial transit data (e.g., Kepler/TESS targets)
     return ["TIC 259372387", "TIC 441462507", "TIC 231663951"]
 
 def analyze_raw_star_light_chart(star_id):
@@ -46,11 +58,20 @@ def analyze_raw_star_light_chart(star_id):
     ssl._create_default_https_context = ssl._create_unverified_context
     
     try:
-        search_result = lk.search_lightcurve(star_id, author='TESS', cadence='short')
+        # FIXED: Broadened search parameters to avoid skipping valid charts
+        # 1. Try standard TESS author first (removed strict cadence)
+        search_result = lk.search_lightcurve(star_id, author='TESS')
+        
+        # 2. If empty, fall back to any author (SPOC, QLP, etc.) and any cadence
         if len(search_result) == 0:
-            print(f"📋 Skipping {star_id}: Light charts currently restricted or offline.")
+            print(f"🔍 TESS-specific search empty for {star_id}. Expanding search parameters...")
+            search_result = lk.search_lightcurve(star_id)
+            
+        if len(search_result) == 0:
+            print(f"📋 Skipping {star_id}: Light charts currently restricted, offline, or non-existent in MAST.")
             return None
             
+        # Download the first available collection
         lc_collection = search_result[:1].download_all()
         lc = lc_collection.stitch().flatten(window_length=401).remove_outliers()
         
@@ -94,7 +115,7 @@ def analyze_raw_star_light_chart(star_id):
             
             # --- AUTOMATED EXOFOP SUBMISSION PACKAGE GENERATION ---
             if results.snr >= 6.0:  # Triggers automatically for verified discoveries
-                print(f"🚨 Elite Candidate! Generating ExoFOP Submission Packet for {star_id}...")
+                print(f"🚨 Elite Candidate! Generating Observation Report Packet for {star_id}...")
                 
                 exofop_report = f"""=======================================================
 NASA EXOFOP PLANET CANDIDATE OBSERVATION REPORT
