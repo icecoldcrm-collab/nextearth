@@ -11,11 +11,17 @@ st.set_page_config(page_title="NextEarth Exoplanet Dashboard", page_icon="🔭",
 st.title("🔭 NextEarth Exoplanet Discovery Dashboard")
 st.markdown("Automated telemetry, transit analysis, and habitability tracking for novel space candidates.")
 
-# Load candidates database if it exists
-if os.path.exists("habitable_candidates.csv"):
-    df_candidates = pd.read_csv("habitable_candidates.csv")
+# Load candidates database safely with column fallback
+if os.path.exists("habitable_candidates.csv") and os.path.getsize("habitable_candidates.csv") > 0:
+    try:
+        df_candidates = pd.read_csv("habitable_candidates.csv")
+    except Exception:
+        df_candidates = pd.DataFrame()
 else:
-    # Fallback dummy data if file isn't generated yet
+    df_candidates = pd.DataFrame()
+
+# Fallback or dynamic column detection for target names
+if df_candidates.empty:
     df_candidates = pd.DataFrame({
         'target': ['Alpha-Discovery-01b'],
         'period_days': [3.92],
@@ -25,11 +31,14 @@ else:
         'status': ['NEW_DISCOVERY']
     })
 
-# Candidate selection dropdown
-selected_target = st.selectbox("Select Candidate System", df_candidates['target'].values)
+# Identify the correct target column dynamically
+target_col = 'target' if 'target' in df_candidates.columns else df_candidates.columns[0]
 
-# Filter data for selected target
-target_row = df_candidates[df_candidates['target'] == selected_target].iloc[0]
+# Candidate selection dropdown
+selected_target = st.selectbox("Select Candidate System", df_candidates[target_col].values)
+
+# Filter data for selected target securely
+target_row = df_candidates[df_candidates[target_col] == selected_target].iloc[0]
 
 st.subheader(f"System Analysis: {selected_target}")
 
