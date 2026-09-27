@@ -15,7 +15,7 @@ def is_known_exoplanet(tic_id):
     """
     url = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
     
-// Clean numeric ID from string if needed
+    # Clean numeric ID from string if needed
     clean_id = str(tic_id).replace("TIC", "").strip()
     query = f"select toi from toi where tic = {clean_id}"
     params = {'query': query, 'format': 'json'}
