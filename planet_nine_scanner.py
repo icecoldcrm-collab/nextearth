@@ -1,3 +1,5 @@
+# Save this file as: planet_nine_motion_detector.py
+
 import pandas as pd
 import numpy as np
 import requests
@@ -6,19 +8,20 @@ from astropy.coordinates import SkyCoord
 import astropy.units as u
 import urllib3
 import matplotlib.pyplot as plt
+import time
 import os
 
 # Suppress certificate warnings for secure TAP queries
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-def fetch_epoch_data(catalog_table, max_rows=300):
+def fetch_epoch_data(catalog_table, max_rows=150):
     """
-    Queries an infrared catalog table from the NASA IRSA TAP service.
+    Queries an infrared catalog table from the NASA IRSA TAP service 
+    with built-in retry logic and extended timeout protection.
     """
     print(f"🛰️ Querying NASA IRSA TAP for catalog: {catalog_table}...")
     url = "https://irsa.ipac.caltech.edu/TAP/sync"
     
-    # Query coordinates and infrared magnitudes for faint cold targets
     query_str = f"""
     select top {max_rows} ra, dec, w1mpro, w2mpro 
     from {catalog_table} 
@@ -29,17 +32,21 @@ def fetch_epoch_data(catalog_table, max_rows=300):
     params = {'query': query_str, 'format': 'csv'}
     headers = {'User-Agent': 'Mozilla/5.0'}
     
-    try:
-        response = requests.get(url, params=params, headers=headers, timeout=30, verify=False)
-        if response.status_code == 200 and "ERROR" not in response.text.upper():
-            df = pd.read_csv(StringIO(response.text))
-            print(f"📥 Retrieved {len(df)} records from {catalog_table}.")
-            return df
-        else:
-            print(f"⚠️ API Error response: {response.text[:150]}")
-    except Exception as e:
-        print(f"⚠️ Connection exception on {catalog_table}: {e}")
-        
+    # Retry loop to handle public server throttling or timeouts
+    for attempt in range(3):
+        try:
+            response = requests.get(url, params=params, headers=headers, timeout=60, verify=False)
+            if response.status_code == 200 and "ERROR" not in response.text.upper():
+                df = pd.read_csv(StringIO(response.text))
+                print(f"📥 Retrieved {len(df)} records from {catalog_table}.")
+                return df
+            else:
+                print(f"⚠️ API Error response (Attempt {attempt+1}/3): {response.text[:150]}")
+        except Exception as e:
+            print(f"⚠️ Connection exception on {catalog_table} (Attempt {attempt+1}/3): {e}")
+            time.sleep(5)
+            
+    print(f"❌ Failed to fetch data from {catalog_table} after 3 attempts.")
     return pd.DataFrame()
 
 def plot_solar_system_candidate(candidate_row):
@@ -99,8 +106,8 @@ def detect_moving_candidates():
     and generates telemetry output and maps.
     """
     # Epoch 1: AllWISE baseline & Epoch 2: NEOWISE Reactivation baseline
-    df_epoch1 = fetch_epoch_data('allwise_p3as_psd', max_rows=300)
-    df_epoch2 = fetch_epoch_data('neowise_p1bs_psd', max_rows=300)
+    df_epoch1 = fetch_epoch_data('allwise_p3as_psd', max_rows=150)
+    df_epoch2 = fetch_epoch_data('neowise_p1bs_psd', max_rows=150)
     
     if df_epoch1.empty or df_epoch2.empty:
         print("❌ Insufficient data returned from one or more epochs.")
@@ -129,7 +136,7 @@ def detect_moving_candidates():
         # Plot top candidate on the solar system map
         plot_solar_system_candidate(moving_candidates.iloc[0])
     else:
-        print("📋 No significant motion detected above threshold in this sample batch. (Tip: Try increasing max_rows or adjusting magnitude bounds)")
+        print("📋 No significant motion detected above threshold in this sample batch.")
 
 if __name__ == "__main__":
     detect_moving_candidates()
