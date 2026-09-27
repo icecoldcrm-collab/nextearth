@@ -30,13 +30,35 @@ with col2:
 
 st.markdown(f"📝 **Discovery Log Notes:** {row['observer_notes']}")
 
-# --- Habitable Zone Visualizer Chart with Host Star ---
+# --- Stellar Color Mapping Function based on Effective Temperature (Teff) ---
+def get_star_color(teff):
+    if teff >= 10000:
+        return '#9bb0ff'  # O/B-type: Blue-white
+    elif teff >= 7500:
+        return '#cad7ff'  # A-type: White
+    elif teff >= 6000:
+        return '#f8f7ff'  # F-type: Yellow-white
+    elif teff >= 5200:
+        return '#ffe4b5'  # G-type: Yellow (Sun-like, ~5778K)
+    elif teff >= 3700:
+        return '#ffad5b'  # K-type: Orange
+    else:
+        return '#ff4500'  # M-type: Red Dwarf
+
+# Fetch star properties safely (with defaults if old mock data is loaded)
+star_teff = row.get('star_teff', 5778)
+star_radius = row.get('star_radius', 1.0)
+star_color = get_star_color(star_teff)
+
+# --- Habitable Zone Visualizer Chart with Scaled Colored Star ---
 fig, ax = plt.subplots(figsize=(8, 1.8))
 fig.patch.set_facecolor('#0e1117')
 ax.set_facecolor('#1e222b')
 
-# 1. Plot the Host Star at the center (0.0 AU)
-ax.scatter([0.0], [0], color='gold', s=250, marker='*', zorder=6, label='Host Star')
+# 1. Plot the Host Star (Scaled by radius and colored by temperature type)
+# Note: Radius is exaggerated slightly for visual clarity on an AU scale
+star_marker_size = max(80, float(star_radius) * 120)
+ax.scatter([0.0], [0], color=star_color, s=star_marker_size, zorder=6, label=f'Host Star ({star_teff}K)')
 
 # 2. Draw the Habitable Zone (Green Shaded Region)
 hz_inner = row['hz_inner_edge_au']
