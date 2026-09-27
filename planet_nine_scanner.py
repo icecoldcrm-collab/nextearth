@@ -59,7 +59,8 @@ def plot_solar_system_candidate(candidate_row):
     """
     print("🗺️ Generating Top-Down Solar System Mapping Visualization...")
     
-    fig, ax = plt.subplots(subplot_projection='polar', figsize=(8, 8))
+    # Fixed: Use subplot_kw to pass the polar projection dictionary correctly
+    fig, ax = plt.subplots(subplot_kw={'projection': 'polar'}, figsize=(8, 8))
     fig.patch.set_facecolor('#0e1117')
     ax.set_facecolor('#1e222b')
     
