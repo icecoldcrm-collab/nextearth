@@ -1,105 +1,57 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Universal Exoplanet Dashboard", layout="wide")
-st.title("🌌 Dual-Stream Exoplanet Characterisation Terminal")
-st.write("Cross-analyzing confirmed stellar archives alongside custom transit graph discoveries.")
+# Load active catalog database
+df = pd.read_csv("habitable_candidates.csv")
 
-# --- DATA STREAM A: KNOWN PLANET REPOSITORY REFERENCE (EMBEDDED) ---
-known_universe_data = [
-    ['Earth', 1.0, 'Earth-sized Rocky', 1.0, 0.95, 1.37, '🎯 PRIORITY 1: Habitable Zone Rocky World', 'Our baseline system.'],
-    ['Mars', 0.53, 'Sub-Earth', 1.52, 0.95, 1.37, '❌ Outside Habitable Zone', 'Frozen outer desert.'],
-    ['Venus', 0.95, 'Earth-sized Rocky', 0.72, 0.95, 1.37, '❌ Outside Habitable Zone', 'Runaway greenhouse envelope.'],
-    ['TRAPPIST-1 e', 0.92, 'Earth-sized Rocky', 0.029, 0.021, 0.030, '🎯 PRIORITY 1: Habitable Zone Rocky World', 'Confirmed M-Dwarf rocky priority.'],
-    ['Kepler-22 b', 2.40, 'Super-Earth / Ocean World', 0.849, 0.847, 1.22, '🎯 PRIORITY 1: Habitable Zone Rocky World', 'First Kepler habitable zone target.']
-]
-cols = ['pl_name', 'pl_rade', 'size_classification', 'calculated_distance_au', 'hz_inner_edge_au', 'hz_outer_edge_au', 'habitability_status', 'observer_notes']
-global_archive_df = pd.DataFrame(known_universe_data, columns=cols)
+# Select a target (example dropdown or sidebar selection)
+selected_target = st.selectbox("Select Candidate System", df['pl_name'].unique())
+row = df[df['pl_name'] == selected_target].iloc[0]
 
-# --- DATA STREAM B: YOUR CUSTOM PIPELINE ENGINE DISCOVERIES ---
-try:
-    my_discoveries_df = pd.read_csv("habitable_candidates.csv")
-    my_pipeline_loaded = True
-except FileNotFoundError:
-    my_pipeline_loaded = False
-    my_discoveries_df = pd.DataFrame()
+st.markdown(f"### 🔭 System Analysis: {row['pl_name']}")
 
-# --- SIDEBAR CONTROL PANEL ---
-st.sidebar.header("📬 Data Universe Stream")
-feed_selector = st.sidebar.radio(
-    "Select Telemetry Source:",
-    ["🌌 Confirmed Exoplanet Repository", "🎯 My Custom Transit Graph Discoveries"]
-)
+# --- FIX: Read the exact status straight from the CSV database ---
+status_text = row['habitability_status']
 
-if "My Custom" in feed_selector and my_pipeline_loaded and not my_discoveries_df.empty:
-    active_df = my_discoveries_df.copy()
-    st.sidebar.success("🔗 Now displaying targets processed by your transit discovery code!")
+if "PRIORITY 1" in status_text:
+    st.success(f"### Current Planet Status: {status_text}")
+elif "Zone Match" in status_text or "⚠️" in status_text:
+    st.warning(f"### Current Planet Status: {status_text}")
 else:
-    active_df = global_archive_df.copy()
-    if "My Custom" in feed_selector:
-        st.sidebar.warning("📊 Pipeline spreadsheet compiling... showing baseline references.")
+    st.error(f"### Current Planet Status: {status_text}")
 
-# Dropdown Target Selector
-planet_choices = sorted(active_df['pl_name'].dropna().tolist())
-selected_planet = st.sidebar.selectbox("Select Target Planet for Profile Mapping:", ["Custom Parameters (Manual)"] + planet_choices)
+# Display metrics
+col1, col2 = st.columns(2)
+with col1:
+    st.metric("Planet Sizing Type", row['size_classification'])
+with col2:
+    st.metric("Orbital Coordinates", f"{row['calculated_distance_au']} AU")
 
-# Fine-tuning slider hooks
-init_lum, init_rad, init_dist = 1.0, 1.0, 1.0
-if selected_planet != "Custom Parameters (Manual)" and not active_df.empty:
-    p_rows = active_df[active_df['pl_name'] == selected_planet]
-    if not p_rows.empty:
-        p_row = p_rows.iloc[0]
-        init_dist = float(p_row['calculated_distance_au'])
-        init_rad = float(p_row['pl_rade'])
-        init_lum = float((p_row['hz_inner_edge_au']**2) * 1.1)
+st.markdown(f"📝 **Discovery Log Notes:** {row['observer_notes']}")
 
-st.sidebar.subheader("🛠️ Fine-Tune Parameters")
-star_luminosity = st.sidebar.slider("Host Star Luminosity (Relative to Sun)", 0.0001, 10.0, init_lum, step=0.01)
-my_radius = st.sidebar.slider("Your Planet Radius (Earth Radii)", 0.1, 25.0, init_rad, step=0.1)
-my_distance = st.sidebar.slider("Your Orbital Distance (AU)", 0.005, 5.0, init_dist, step=0.005)
+# --- Habitable Zone Visualizer Chart ---
+fig, ax = plt.subplots(figsize=(8, 1.5))
+fig.patch.set_facecolor('#0e1117')
+ax.set_facecolor('#1e222b')
 
-# --- RE-CALCULATING ENVIRONMENT PROFILE ---
-base_inner = np.sqrt(star_luminosity / 1.1)
-base_outer = np.sqrt(star_luminosity / 0.53)
-hz_inner, hz_outer = base_inner, base_outer
+# Draw the Habitable Zone (Green Shaded Region)
+hz_inner = row['hz_inner_edge_au']
+hz_outer = row['hz_outer_edge_au']
+ax.axvspan(hz_inner, hz_outer, color='#28a745', alpha=0.4, label='Goldilocks Zone')
 
-size_class = "Sub-Earth" if my_radius<=0.8 else ("Earth-sized Rocky World" if my_radius<=1.25 else ("Super-Earth" if my_radius<=2.0 else "Gas Giant"))
-status_text = "🎯 INSIDE GOLDILOCKS ZONE!" if (hz_inner <= my_distance <= hz_outer) and size_class in ["Earth-sized Rocky World", "Super-Earth"] else "❌ OUTSIDE GOLDILOCKS ZONE"
-status_color = "green" if "INSIDE" in status_text else "red"
+# Plot the Planet's Orbital Axis
+planet_dist = row['calculated_distance_au']
+ax.scatter([planet_dist], [0], color='#1f77b4', s=150, zorder=5, edgecolors='white', label='Candidate Orbit')
 
-st.subheader(f"🔍 System Analysis: {selected_planet}")
-st.markdown(f"### Current Planet Status: :{status_color}[{status_text}]")
+ax.set_xlim(0, max(3.0, planet_dist + 0.5))
+ax.set_yticks([])
+ax.set_xlabel("Orbital Distance (AU)", color='white', fontsize=9)
+ax.tick_params(colors='white', labelsize=8)
+ax.spines['top'].set_visible(False)
+ax.spines['left'].set_visible(False)
+ax.spines['right'].set_visible(False)
+ax.spines['bottom'].set_color('white')
+ax.legend(loc='upper right', fontsize=8, facecolor='#1e222b', edgecolor='none', labelcolor='white')
 
-col_metrics, col_chart = st.columns(2)
-with col_metrics:
-    st.metric("Planet Sizing Type", size_class)
-    st.metric("Orbital Coordinates", f"{my_distance:.3f} AU")
-    if selected_planet != "Custom Parameters (Manual)" and not p_rows.empty:
-        st.caption(f"📝 **Discovery Log Notes:** {p_row['observer_notes']}")
-
-with col_chart:
-    fig, ax = plt.subplots(figsize=(6, 2.3))
-    fig.patch.set_facecolor('#0e1117'); ax.set_facecolor('#0e1117')
-    ax.scatter(0, 0, s=100, color='#f9d71c', edgecolors='#ffaa00', label='Host Star', zorder=5)
-    ax.axvspan(hz_inner, hz_outer, color='#2ea44f', alpha=0.35, label='Goldilocks HZ')
-    ax.scatter(my_distance, 0, s=60, color='#1f77b4', edgecolors='white', label='Planet Core', zorder=6)
-    max_b = max(3.0, hz_outer * 1.3, my_distance * 1.2)
-    ax.set_xlim(-0.02 * max_b, max_b); ax.set_ylim(-0.5, 0.5); ax.get_yaxis().set_visible(False)
-    ax.spines['bottom'].set_color('#ffffff'); ax.tick_params(colors='white')
-    for s in ['top','left','right']: ax.spines[s].set_visible(False)
-    st.pyplot(fig)
-
-st.markdown("---")
-# --- DATA EXPORT UTILITY BUTTON ---
-st.header("📋 Target Catalog Data Archive")
-if not active_df.empty:
-    csv_data = active_df.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="📥 Download Active Catalog Table as CSV Spreadsheet",
-        data=csv_data,
-        file_name="exoplanet_catalog_discovery_report.csv",
-        mime="text/csv"
-    )
-st.dataframe(active_df, use_container_width=True)
+st.pyplot(fig)
