@@ -8,22 +8,22 @@ import ssl
 import urllib3
 from io import StringIO
 
-# Suppress certificate warning clutter in GitHub execution logs
+# Suppress certificate warning clutter in execution logs
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def fetch_live_unidentified_stream(limit=3):
     """
-    Connects to the NASA Exoplanet Archive database and harvests a batch of the most recent,
-    unconfirmed Threshold Crossing Events (TCEs) / TESS Input Catalog (TIC) IDs.
+    Connects directly to the NASA Exoplanet Archive TAP service and harvests 
+    live, recent TESS Objects of Interest (TOIs) from the active registry.
     """
-    print("🛰️ Harvesting Live Unclassified Stream from NASA Registry...")
+    print("🛰️ Harvesting Live Unclassified Stream from NASA Exoplanet Archive TAP API...")
     
-    # FIXED: Pointing to the official NASA Exoplanet Archive TAP sync endpoint instead of a base domain
+    # Official NASA Exoplanet Archive TAP sync endpoint
     url = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
     
-    # Adjusting query for the official TAP interface (pulling from the standard TCE tables)
+    # Query the official TESS Objects of Interest (TOI) table using valid column 'tid'
     params = {
-        'query': "select top 100 ticid from q1_q17_dr25_tce where tce_prad > 0 order by tce_time0bk desc",
+        'query': "select top 50 tid from toi order by toi desc",
         'format': 'csv'
     }
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -33,21 +33,21 @@ def fetch_live_unidentified_stream(limit=3):
         if response.status_code == 200 and "ERROR" not in response.text.upper():
             df_stream = pd.read_csv(StringIO(response.text))
             
-            # TAP endpoint column names might be lowercase depending on the table
-            if 'ticid' in df_stream.columns:
-                df_stream['target_id'] = "TIC " + df_stream['ticid'].astype(str)
+            if 'tid' in df_stream.columns:
+                df_stream['target_id'] = "TIC " + df_stream['tid'].astype(str)
             else:
-                # Fallback if standard column mapping misses
                 df_stream['target_id'] = "TIC " + df_stream.iloc[:, 0].astype(str)
                 
-            unique_targets = df_stream['target_id'].unique()[:limit].tolist()
-            print(f"📥 Successfully isolated {len(unique_targets)} new unverified systems for audit: {unique_targets}")
+            unique_targets = df_stream['target_id'].dropna().unique()[:limit].tolist()
+            print(f"📥 Successfully isolated {len(unique_targets)} live systems from NASA: {unique_targets}")
             return unique_targets
+        else:
+            print(f"⚠️ NASA TAP API responded with error text: {response.text[:150]}")
     except Exception as e:
-        print(f"⚠️ API connection timed out or failed parsing: {e}. Utilizing calibrated fallback target queue.")
+        print(f"⚠️ API connection exception: {e}")
     
-    # Fallback TICs known to have good tutorial transit data (e.g., Kepler/TESS targets)
-    return ["TIC 259372387", "TIC 441462507", "TIC 231663951"]
+    # Minimal safety fallback only if network completely drops
+    return ["TIC 307210830"]
 
 def analyze_raw_star_light_chart(star_id):
     """
@@ -58,30 +58,23 @@ def analyze_raw_star_light_chart(star_id):
     ssl._create_default_https_context = ssl._create_unverified_context
     
     try:
-        # FIXED: Broadened search parameters to avoid skipping valid charts
-        # 1. Try standard TESS author first (removed strict cadence)
-        search_result = lk.search_lightcurve(star_id, author='TESS')
-        
-        # 2. If empty, fall back to any author (SPOC, QLP, etc.) and any cadence
-        if len(search_result) == 0:
-            print(f"🔍 TESS-specific search empty for {star_id}. Expanding search parameters...")
-            search_result = lk.search_lightcurve(star_id)
+        # Broadened search parameters to avoid skipping valid charts
+        search_result = lk.search_lightcurve(star_id)
             
         if len(search_result) == 0:
             print(f"📋 Skipping {star_id}: Light charts currently restricted, offline, or non-existent in MAST.")
             return None
             
-        # Download the first available collection
         lc_collection = search_result[:1].download_all()
         lc = lc_collection.stitch().flatten(window_length=401).remove_outliers()
         
-        # High-performance downsampling optimization to compress processing times down to seconds
+        # High-performance downsampling optimization
         lc_binned = lc.bin(time_bin_size=0.02) 
         time = lc_binned.time.value
         flux = lc_binned.flux.value
         
         model = transitleastsquares(time, flux)
-        results = model.power(period_min=1.0, period_max=10.0, oversampling_factor=1, duration_grid_step=2)
+        results = model.power(period_min=1.0, period_max=15.0, oversampling_factor=1, duration_grid_step=2)
         
         print(f"🧠 Analysis Finished! Signal-to-Noise Ratio (SNR): {results.snr:.2f}")
         
@@ -101,28 +94,32 @@ def analyze_raw_star_light_chart(star_id):
             hz_inner = np.sqrt(star_luminosity / 1.1)
             hz_outer = np.sqrt(star_luminosity / 0.53)
             
-            if planet_radius_earth <= 0.8: size_class = "Sub-Earth"
-            elif 0.8 < planet_radius_earth <= 1.25: size_class = "Earth-sized Rocky"
-            elif 1.25 < planet_radius_earth <= 2.4: size_class = "Super-Earth / Ocean World"
-            else: size_class = "Gas Giant"
+            if planet_radius_earth <= 0.8: 
+                size_class = "Sub-Earth"
+            elif 0.8 < planet_radius_earth <= 1.25: 
+                size_class = "Earth-sized Rocky"
+            elif 1.25 < planet_radius_earth <= 2.4: 
+                size_class = "Super-Earth / Ocean World"
+            else: 
+                size_class = "Gas Giant"
             
             if hz_inner <= calculated_distance_au <= hz_outer:
                 status = "🎯 PRIORITY 1: Habitable Zone Rocky World" if "Rocky" in size_class or "Super-Earth" in size_class else "⚠️ Zone Match"
             else:
                 status = "❌ Outside Habitable Zone"
                 
-            notes = f"Discovered in Unclassified Feed. SNR: {results.snr:.1f}. Loop Period: {period_days:.2f} days."
+            notes = f"Discovered via Live NASA Stream. SNR: {results.snr:.1f}. Loop Period: {period_days:.2f} days."
             
-            # --- AUTOMATED EXOFOP SUBMISSION PACKAGE GENERATION ---
-            if results.snr >= 6.0:  # Triggers automatically for verified discoveries
-                print(f"🚨 Elite Candidate! Generating Observation Report Packet for {star_id}...")
-                
-                exofop_report = f"""=======================================================
+            # --- AUTOMATED REPORT PACKAGE GENERATION ---
+            print(f"🚨 Elite Candidate! Generating Observation Report Packet for {star_id}...")
+            
+            clean_id = star_id.replace(' ', '_')
+            exofop_report = f"""=======================================================
 NASA EXOFOP PLANET CANDIDATE OBSERVATION REPORT
 Generated by: Automated TLS Analysis Engine
 =======================================================
 Target Identifier : {star_id}
-Candidate Name    : {star_id.replace(' ', '')}-candidate
+Candidate Name    : {clean_id}-candidate
 Orbital Period    : {period_days:.5f} days
 Transit Depth     : {transit_depth * 1000000:.1f} ppm
 Planet Radius     : {planet_radius_earth:.2f} Earth Radii
@@ -136,35 +133,35 @@ Signal extracted via Transit Least Squares (TLS) matching on
 binned space telescope telemetry arrays. Detrending applied 
 via a window-length 401 flatten array filter matrix.
 ======================================================="""
+            
+            report_filename = f"exofop_submission_{clean_id}.txt"
+            with open(report_filename, "w") as f:
+                f.write(exofop_report)
+            
+            try:
+                import matplotlib.pyplot as plt
+                fig, ax = plt.subplots(figsize=(6, 4))
+                fig.patch.set_facecolor('#0e1117')
+                ax.set_facecolor('#1e222b')
                 
-                report_filename = f"exofop_submission_{star_id.replace(' ', '')}.txt"
-                with open(report_filename, "w") as f:
-                    f.write(exofop_report)
+                ax.scatter(results.folded_phase, results.folded_y, c='white', s=2, alpha=0.3, label='Binned Telemetry')
+                ax.plot(results.model_folded_phase, results.model_folded_model, color='#ff7f0e', linewidth=2, label='TLS Geometric Fit')
                 
-                try:
-                    import matplotlib.pyplot as plt
-                    fig, ax = plt.subplots(figsize=(6, 4))
-                    fig.patch.set_facecolor('#0e1117')
-                    ax.set_facecolor('#1e222b')
-                    
-                    ax.scatter(results.folded_phase, results.folded_y, c='white', s=2, alpha=0.3, label='Binned Telemetry')
-                    ax.plot(results.model_folded_phase, results.model_folded_model, color='#ff7f0e', linewidth=2, label='TLS Geometric Fit')
-                    
-                    ax.set_title(f"Transit Validation Profile: {star_id}", color='white', fontsize=10)
-                    ax.set_xlabel("Orbital Phase", color='white', fontsize=8)
-                    ax.set_ylabel("Relative Brightness (Flux)", color='white', fontsize=8)
-                    ax.tick_params(colors='white', labelsize=8)
-                    ax.grid(alpha=0.1)
-                    ax.legend(loc='lower left', fontsize=8)
-                    
-                    plot_filename = f"transit_chart_{star_id.replace(' ', '')}.png"
-                    plt.savefig(plot_filename, dpi=150, bbox_inches='tight')
-                    plt.close()
-                except Exception as e:
-                    print(f"⚠️ Could not compile diagnostic plot graphic: {e}")
+                ax.set_title(f"Transit Validation Profile: {star_id}", color='white', fontsize=10)
+                ax.set_xlabel("Orbital Phase", color='white', fontsize=8)
+                ax.set_ylabel("Relative Brightness (Flux)", color='white', fontsize=8)
+                ax.tick_params(colors='white', labelsize=8)
+                ax.grid(alpha=0.1)
+                ax.legend(loc='lower left', fontsize=8)
+                
+                plot_filename = f"transit_chart_{clean_id}.png"
+                plt.savefig(plot_filename, dpi=150, bbox_inches='tight')
+                plt.close()
+            except Exception as e:
+                print(f"⚠️ Could not compile diagnostic plot graphic: {e}")
 
             return {
-                'pl_name': f"{star_id.replace(' ', '')}-candidate",
+                'pl_name': f"{clean_id}-candidate",
                 'pl_rade': round(planet_radius_earth, 2),
                 'size_classification': size_class,
                 'calculated_distance_au': round(calculated_distance_au, 3),
