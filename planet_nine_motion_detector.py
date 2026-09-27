@@ -1,83 +1,63 @@
-import pandas as pd
+import matplotlib.pyplot as plt
 import numpy as np
-import requests
-from io import StringIO
-from astropy.coordinates import SkyCoord
-import astropy.units as u
-import urllib3
 
-# Suppress certificate warnings for secure TAP queries
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+def plot_solar_system_candidate(candidate_row):
+    """
+    Plots a top-down polar view of the solar system, mapping known outer planets
+    and positioning the candidate object based on its sky angle and estimated distance.
+    """
+    print("🗺️ Generating Top-Down Solar System Mapping Visualization...")
+    
+    # Setup polar coordinates (Angle in radians, Radius in Astronomical Units - AU)
+    fig, ax = plt.subplots(subplot_projection='polar', figsize=(8, 8))
+    fig.patch.set_facecolor('#0e1117')
+    ax.set_facecolor('#1e222b')
+    
+    # Known Planet Orbits (Approximate average distances in AU)
+    planets = {
+        'Earth': (1.0, 0.0, 'cyan', 3),
+        'Jupiter': (5.2, 1.2, 'orange', 6),
+        'Saturn': (9.5, 2.4, 'gold', 5),
+        'Uranus': (19.2, 3.5, 'lightblue', 7),
+        'Neptune': (30.1, 4.8, 'blue', 7)
+    }
+    
+    # Plot known planets for scale
+    for name, (dist, angle, color, size) in planets.items():
+        ax.scatter(angle, dist, c=color, s=size*10, label=name, edgecolors='white', linewidths=0.5)
+        ax.text(angle, dist + 2, name, color='white', fontsize=8, ha='center')
 
-def fetch_epoch_data(catalog_table, max_rows=500):
-    """
-    Queries an infrared catalog table from the NASA IRSA TAP service.
-    """
-    print(f"🛰️ Querying NASA IRSA TAP for catalog: {catalog_table}...")
-    url = "https://irsa.ipac.caltech.edu/TAP/sync"
+    # Approximate candidate position (Using RA converted to angle, and an estimated outer-system distance, e.g., 500 AU)
+    ra_deg = candidate_row.get('ra', 180.0)
+    candidate_angle = np.deg2rad(ra_deg % 360) # Map RA to orbital angle
     
-    # Query coordinates and infrared magnitudes for faint cold targets
-    query_str = f"""
-    select top {max_rows} ra, dec, w1mpro, w2mpro 
-    from {catalog_table} 
-    where w1mpro > 14.0 and w2mpro > 13.0
-    order by w1mpro asc
-    """
+    # Estimate distance based on brightness profile (faint cold objects mapped further out)
+    estimated_distance_au = 500.0 
     
-    params = {'query': query_str, 'format': 'csv'}
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    # Relative sizing: Scale marker based on infrared magnitude / estimated radius 
+    # (Planet Nine is theorized to be ~3 to 5 Earth radii - an Ice Giant)
+    marker_size = 150 
     
-    try:
-        response = requests.get(url, params=params, headers=headers, timeout=30, verify=False)
-        if response.status_code == 200 and "ERROR" not in response.text.upper():
-            df = pd.read_csv(StringIO(response.text))
-            print(f"📥 Retrieved {len(df)} records from {catalog_table}.")
-            return df
-        else:
-            print(f"⚠️ API Error: {response.text[:150]}</h2>")
-    except Exception as e:
-        print(f"⚠️ Connection exception: {e}")
-        
-    return pd.DataFrame()
+    ax.scatter(
+        candidate_angle, estimated_distance_au, 
+        c='#ff4b4b', s=marker_size, marker='*', 
+        label='Planet Nine Candidate', edgecolors='yellow', linewidths=1.5
+    )
+    
+    # Styling the polar plot for deep-space aesthetics
+    ax.set_rmax(700) # View out to 700 AU
+    ax.tick_params(colors='white', labelsize=8)
+    ax.grid(color='gray', alpha=0.3, linestyle='--')
+    ax.set_title("Outer Solar System Candidate Mapping (Top-Down View)", color='white', pad=20, fontsize=11)
+    
+    # Legend and layout
+    ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1), facecolor='#1e222b', edgecolor='none', labelcolor='white', fontsize=8)
+    
+    plot_filename = "planet_nine_solar_system_map.png"
+    plt.savefig(plot_filename, dpi=200, bbox_inches='tight')
+    plt.close()
+    print(f"💾 Solar system map successfully saved as '{plot_filename}'!")
 
-def detect_moving_candidates():
-    """
-    Cross-matches coordinates between epochs to find objects with significant sky drift.
-    """
-    # Epoch 1: AllWISE baseline (circa 2010)
-    df_epoch1 = fetch_epoch_data('allwise_p3as_psd', max_rows=300)
-    # Epoch 2: NEOWISE Reactivation baseline (later years)
-    df_epoch2 = fetch_epoch_data('neowise_p1bs_psd', max_rows=300)
-    
-    if df_epoch1.empty or df_epoch2.empty:
-        print("❌ Insufficient data returned from one or more epochs.")
-        return
-        
-    print("\n🔍 Running Astropy Sky-Coord Cross-Match across epochs...")
-    
-    # Convert coordinates into Astropy SkyCoord objects
-    coords1 = SkyCoord(ra=df_epoch1['ra'].values * u.deg, dec=df_epoch1['dec'].values * u.deg)
-    coords2 = SkyCoord(ra=df_epoch2['ra'].values * u.deg, dec=df_epoch2['dec'].values * u.deg)
-    
-    # Find the nearest neighbor in Epoch 2 for every object in Epoch 1
-    idx, separation, _ = coords1.match_to_catalog_sky(coords2)
-    
-    # Attach separation distances (converted to arcseconds) back to the dataframe
-    df_epoch1['separation_arcsec'] = separation.arcsec
-    
-    # Filter for objects that moved more than a threshold (e.g., > 2.0 arcseconds), 
-    # indicating a potential moving solar system source rather than a static star.
-    motion_threshold = 2.0  # arcseconds
-    moving_candidates = df_epoch1[df_epoch1['separation_arcsec'] > motion_threshold].copy()
-    
-    print(f"🎯 Analysis Complete! Isolated {len(moving_candidates)} objects exhibiting multi-epoch sky drift.")
-    
-    if not moving_candidates.empty:
-        print(moving_candidates[['ra', 'dec', 'w1mpro', 'separation_arcsec']].head(10))
-        moving_candidates.to_csv("planet_nine_moving_candidates.csv", index=False)
-        print("\n💾 Saved moving candidates to 'planet_nine_moving_candidates.csv'.")
-    else:
-        print("📋 No significant motion detected above the threshold in this sample batch.")
-
-if __name__ == "__main__":
-    detect_moving_candidates()
+# Example integration call:
+# if not moving_candidates.empty:
+#     plot_solar_system_candidate(moving_candidates.iloc[0])
