@@ -30,7 +30,7 @@ jobs:
         env:
           PYTHONUNBUFFERED: "1"
         run: |
-          python planet_nine_motion_detector.py
+          python planet_nine_scanner.py
 
       - name: Commit and Push Results and Maps
         env:
