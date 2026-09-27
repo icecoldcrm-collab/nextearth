@@ -1,9 +1,11 @@
 name: Automated Exoplanet Discovery Pipeline
 
+
+
 on:
   schedule:
-    - cron: '0 0 * * *' # Adjust schedule as needed (e.g., daily)
-  workflow_dispatch: # Allows manual triggering from the GitHub Actions tab
+    - cron: '0,30 * * * *' # Runs at minute 0 and 30 of every hour
+  workflow_dispatch:
 
 permissions:
   contents: write
