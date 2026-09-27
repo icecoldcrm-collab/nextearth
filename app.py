@@ -14,7 +14,11 @@ st.markdown(f"### 🔭 System Analysis: {row['pl_name']}")
 # Read exact status from database
 status_text = row['habitability_status']
 
-if "PRIORITY 1" in status_text:
+# Change line 17 in app.py from:
+# if "PRIORITY 1" in status_text:
+
+# To this:
+if "PRIORITY 1" in str(status_text):
     st.success(f"### Current Planet Status: {status_text}")
 elif "Zone Match" in status_text or "⚠️" in status_text:
     st.warning(f"### Current Planet Status: {status_text}")
