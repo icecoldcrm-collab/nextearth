@@ -68,6 +68,7 @@ ax.scatter([0.0], [0], color=star_color, s=star_marker_size, zorder=6, label=f'H
 # Ensure Habitable Zone bounds are standard scalar floats
 hz_inner = float(hz_inner)
 hz_outer = float(hz_outer)
+# Then apply them to the axis span plot:
 ax.axvspan(hz_inner, hz_outer, color='#28a745', alpha=0.4, label='Goldilocks Zone')
 
 
