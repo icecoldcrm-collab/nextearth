@@ -2,8 +2,8 @@ name: Automated Exoplanet Discovery Pipeline
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
-  workflow_dispatch:
+    - cron: '0 0 * * *' # Adjust schedule as needed (e.g., daily)
+  workflow_dispatch: # Allows manual triggering from the GitHub Actions tab
 
 permissions:
   contents: write
@@ -18,19 +18,19 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-              python-version: '3.10'
-              cache: 'pip'
+          python-version: '3.10'
+          cache: 'pip'
 
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas numpy requests lightkurve transitleastsquares matplotlib
+          pip install pandas numpy requests astropy matplotlib lightkurve
 
-      - name: Run Analytics Engine
+      - name: Run Exoplanet Pipeline
         env:
           PYTHONUNBUFFERED: "1"
-          BATCH_LIMIT: "50"
         run: |
+          # Replace 'pipeline.py' with your exact main exoplanet script filename if different
           python pipeline.py
 
       - name: Commit and Push Updated CSV File
@@ -41,9 +41,11 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/icecoldcrm-collab/nextearth.git
           
-          # Synchronize with remote branch before committing to prevent race conditions
-          git pull origin main --rebase || echo "No remote changes to pull"
+          # 🔄 Safely stash local generated charts/reports, sync with remote, and pop back before committing
+          git stash || true
+          git pull origin main --rebase || true
+          git stash pop || true
           
           git add habitable_candidates.csv exofop_submission_*.txt transit_chart_*.png || true
           git commit -m "🌌 High-throughput batch update: new exoplanet candidates logged" || echo "No changes to commit"
-          git push
+          git push origin main
