@@ -1,71 +1,135 @@
 import pandas as pd
+import numpy as np
 import requests
-import urllib3
 from io import StringIO
+from astropy.coordinates import SkyCoord
+import astropy.units as u
+import urllib3
+import matplotlib.pyplot as plt
+import os
 
 # Suppress certificate warnings for secure TAP queries
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-def scan_for_cold_infrared_candidates(max_rows=100):
+def fetch_epoch_data(catalog_table, max_rows=300):
     """
-    Connects to the NASA IRSA TAP API to query the AllWISE catalog 
-    for faint, cold infrared sources that match potential outer-solar-system profiles.
+    Queries an infrared catalog table from the NASA IRSA TAP service.
     """
-    print("🛰️ Connecting to NASA IRSA TAP Service (AllWISE Catalog)...")
-    
+    print(f"🛰️ Querying NASA IRSA TAP for catalog: {catalog_table}...")
     url = "https://irsa.ipac.caltech.edu/TAP/sync"
     
-    # ADQL query targeting AllWISE sources with specific infrared magnitudes
-    # W1 (3.4 micron) and W2 (4.6 micron) constraints for cold objects
+    # Query coordinates and infrared magnitudes for faint cold targets
     query_str = f"""
-    select top {max_rows} ra, dec, w1mpro, w2mpro, w1sigmpro, w2sigmpro 
-    from allwise_p3as_psd 
-    where w1mpro > 14.0 and w2mpro > 13.0 
-    and (w1mpro - w2mpro) > -0.5 and (w1mpro - w2mpro) < 0.5
+    select top {max_rows} ra, dec, w1mpro, w2mpro 
+    from {catalog_table} 
+    where w1mpro > 14.0 and w2mpro > 13.0
     order by w1mpro asc
     """
     
-    params = {
-        'query': query_str,
-        'format': 'csv'
-    }
+    params = {'query': query_str, 'format': 'csv'}
     headers = {'User-Agent': 'Mozilla/5.0'}
     
     try:
         response = requests.get(url, params=params, headers=headers, timeout=30, verify=False)
         if response.status_code == 200 and "ERROR" not in response.text.upper():
             df = pd.read_csv(StringIO(response.text))
-            print(f"📥 Successfully retrieved {len(df)} infrared candidate records from IRSA.")
+            print(f"📥 Retrieved {len(df)} records from {catalog_table}.")
             return df
         else:
-            print(f"⚠️ IRSA TAP API error response: {response.text[:200]}")
+            print(f"⚠️ API Error response: {response.text[:150]}")
     except Exception as e:
-        print(f"⚠️ Exception during infrared archive connection: {e}")
+        print(f"⚠️ Connection exception on {catalog_table}: {e}")
         
     return pd.DataFrame()
 
-def evaluate_candidates(df):
+def plot_solar_system_candidate(candidate_row):
     """
-    Highlights and filters objects meeting preliminary size and temperature profiles.
+    Plots a top-down polar view of the solar system, mapping known outer planets
+    and positioning the candidate object based on its sky angle and estimated distance.
     """
-    if df.empty:
-        print("❌ No data available to evaluate.")
+    print("🗺️ Generating Top-Down Solar System Mapping Visualization...")
+    
+    fig, ax = plt.subplots(subplot_projection='polar', figsize=(8, 8))
+    fig.patch.set_facecolor('#0e1117')
+    ax.set_facecolor('#1e222b')
+    
+    # Known Planet Orbits (Approximate average distances in AU)
+    planets = {
+        'Earth': (1.0, 0.0, 'cyan', 3),
+        'Jupiter': (5.2, 1.2, 'orange', 6),
+        'Saturn': (9.5, 2.4, 'gold', 5),
+        'Uranus': (19.2, 3.5, 'lightblue', 7),
+        'Neptune': (30.1, 4.8, 'blue', 7)
+    }
+    
+    # Plot known planets for scale
+    for name, (dist, angle, color, size) in planets.items():
+        ax.scatter(angle, dist, c=color, s=size*10, label=name, edgecolors='white', linewidths=0.5)
+        ax.text(angle, dist + 2, name, color='white', fontsize=8, ha='center')
+
+    # Map candidate RA to polar angle
+    ra_deg = candidate_row.get('ra', 180.0)
+    candidate_angle = np.deg2rad(ra_deg % 360)
+    
+    # Estimated outer-system distance (AU) for a candidate profile
+    estimated_distance_au = 500.0 
+    
+    ax.scatter(
+        candidate_angle, estimated_distance_au, 
+        c='#ff4b4b', s=150, marker='*', 
+        label='Planet Nine Candidate', edgecolors='yellow', linewidths=1.5
+    )
+    
+    # Styling the polar plot for deep-space aesthetics
+    ax.set_rmax(700)
+    ax.tick_params(colors='white', labelsize=8)
+    ax.grid(color='gray', alpha=0.3, linestyle='--')
+    ax.set_title("Outer Solar System Candidate Mapping", color='white', pad=20, fontsize=11)
+    
+    ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1), facecolor='#1e222b', edgecolor='none', labelcolor='white', fontsize=8)
+    
+    plot_filename = "planet_nine_solar_system_map.png"
+    plt.savefig(plot_filename, dpi=200, bbox_inches='tight')
+    plt.close()
+    print(f"💾 Solar system map successfully saved as '{plot_filename}'!")
+
+def detect_moving_candidates():
+    """
+    Cross-matches coordinates between epochs to find objects with significant sky drift
+    and generates telemetry output and maps.
+    """
+    # Epoch 1: AllWISE baseline & Epoch 2: NEOWISE Reactivation baseline
+    df_epoch1 = fetch_epoch_data('allwise_p3as_psd', max_rows=300)
+    df_epoch2 = fetch_epoch_data('neowise_p1bs_psd', max_rows=300)
+    
+    if df_epoch1.empty or df_epoch2.empty:
+        print("❌ Insufficient data returned from one or more epochs.")
         return
         
-    print("\n🔍 Evaluating Infrared Candidates for Outer-System Signatures...")
+    print("\n🔍 Running Astropy Sky-Coord Cross-Match across epochs...")
     
-    # Highlight potential candidates based on infrared flux consistency
-    df['candidate_tag'] = df.apply(lambda row: '⚠️ Potential Cold Source Match' if row['w1mpro'] > 15.0 else '📋 Background Star / Routine Object', axis=1)
+    coords1 = SkyCoord(ra=df_epoch1['ra'].values * u.deg, dec=df_epoch1['dec'].values * u.deg)
+    coords2 = SkyCoord(ra=df_epoch2['ra'].values * u.deg, dec=df_epoch2['dec'].values * u.deg)
     
-    highlights = df[df['candidate_tag'].str.contains('Potential')]
+    # Find nearest neighbor in Epoch 2 for every object in Epoch 1
+    idx, separation, _ = coords1.match_to_catalog_sky(coords2)
+    df_epoch1['separation_arcsec'] = separation.arcsec
     
-    print(f"🎯 Filtered down to {len(highlights)} high-interest cold infrared objects.")
-    print(highlights.head(10))
+    # Filter for motion threshold (> 2.0 arcseconds of sky drift)
+    motion_threshold = 2.0
+    moving_candidates = df_epoch1[df_epoch1['separation_arcsec'] > motion_threshold].copy()
     
-    # Save output for further astrometric checking
-    highlights.to_csv("planet_nine_infrared_candidates.csv", index=False)
-    print("\n💾 Saved filtered candidates to 'planet_nine_infrared_candidates.csv'.")
+    print(f"🎯 Analysis Complete! Isolated {len(moving_candidates)} objects exhibiting multi-epoch drift.")
+    
+    if not moving_candidates.empty:
+        print(moving_candidates[['ra', 'dec', 'w1mpro', 'separation_arcsec']].head(10))
+        moving_candidates.to_csv("planet_nine_moving_candidates.csv", index=False)
+        print("\n💾 Saved moving candidates to 'planet_nine_moving_candidates.csv'.")
+        
+        # Plot top candidate on the solar system map
+        plot_solar_system_candidate(moving_candidates.iloc[0])
+    else:
+        print("📋 No significant motion detected above threshold in this sample batch. (Tip: Try increasing max_rows or adjusting magnitude bounds)")
 
 if __name__ == "__main__":
-    results_df = scan_for_cold_infrared_candidates(max_rows=200)
-    evaluate_candidates(results_df)
+    detect_moving_candidates()
