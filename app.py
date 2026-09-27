@@ -13,7 +13,7 @@ known_universe_data = [
     ['Mars', 0.53, 'Sub-Earth', 1.52, 0.95, 1.37, '❌ Outside Habitable Zone', 'Frozen outer desert.'],
     ['Venus', 0.95, 'Earth-sized Rocky', 0.72, 0.95, 1.37, '❌ Outside Habitable Zone', 'Runaway greenhouse envelope.'],
     ['TRAPPIST-1 e', 0.92, 'Earth-sized Rocky', 0.029, 0.021, 0.030, '🎯 PRIORITY 1: Habitable Zone Rocky World', 'Confirmed M-Dwarf rocky priority.'],
-    ['Kepler-22 b', 2.40, 'Gas Giant', 0.849, 0.847, 1.22, '⚠️ Zone Match (Gas World Configuration)', 'First Kepler habitable zone target.']
+    ['Kepler-22 b', 2.40, 'Super-Earth / Ocean World', 0.849, 0.847, 1.22, '🎯 PRIORITY 1: Habitable Zone Rocky World', 'First Kepler habitable zone target.']
 ]
 cols = ['pl_name', 'pl_rade', 'size_classification', 'calculated_distance_au', 'hz_inner_edge_au', 'hz_outer_edge_au', 'habitability_status', 'observer_notes']
 global_archive_df = pd.DataFrame(known_universe_data, columns=cols)
@@ -33,7 +33,6 @@ feed_selector = st.sidebar.radio(
     ["🌌 Confirmed Exoplanet Repository", "🎯 My Custom Transit Graph Discoveries"]
 )
 
-# Core workflow toggle override switch logic
 if "My Custom" in feed_selector and my_pipeline_loaded and not my_discoveries_df.empty:
     active_df = my_discoveries_df.copy()
     st.sidebar.success("🔗 Now displaying targets processed by your transit discovery code!")
@@ -49,10 +48,12 @@ selected_planet = st.sidebar.selectbox("Select Target Planet for Profile Mapping
 # Fine-tuning slider hooks
 init_lum, init_rad, init_dist = 1.0, 1.0, 1.0
 if selected_planet != "Custom Parameters (Manual)" and not active_df.empty:
-    p_row = active_df[active_df['pl_name'] == selected_planet].iloc[0]
-    init_dist = float(p_row['calculated_distance_au'])
-    init_rad = float(p_row['pl_rade'])
-    init_lum = float((p_row['hz_inner_edge_au']**2) * 1.1)
+    p_rows = active_df[active_df['pl_name'] == selected_planet]
+    if not p_rows.empty:
+        p_row = p_rows.iloc[0]
+        init_dist = float(p_row['calculated_distance_au'])
+        init_rad = float(p_row['pl_rade'])
+        init_lum = float((p_row['hz_inner_edge_au']**2) * 1.1)
 
 st.sidebar.subheader("🛠️ Fine-Tune Parameters")
 star_luminosity = st.sidebar.slider("Host Star Luminosity (Relative to Sun)", 0.0001, 10.0, init_lum, step=0.01)
@@ -75,7 +76,7 @@ col_metrics, col_chart = st.columns(2)
 with col_metrics:
     st.metric("Planet Sizing Type", size_class)
     st.metric("Orbital Coordinates", f"{my_distance:.3f} AU")
-    if selected_planet != "Custom Parameters (Manual)":
+    if selected_planet != "Custom Parameters (Manual)" and not p_rows.empty:
         st.caption(f"📝 **Discovery Log Notes:** {p_row['observer_notes']}")
 
 with col_chart:
@@ -91,5 +92,14 @@ with col_chart:
     st.pyplot(fig)
 
 st.markdown("---")
+# --- DATA EXPORT UTILITY BUTTON ---
 st.header("📋 Target Catalog Data Archive")
+if not active_df.empty:
+    csv_data = active_df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="📥 Download Active Catalog Table as CSV Spreadsheet",
+        data=csv_data,
+        file_name="exoplanet_catalog_discovery_report.csv",
+        mime="text/csv"
+    )
 st.dataframe(active_df, use_container_width=True)
