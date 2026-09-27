@@ -24,7 +24,7 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas numpy requests astropy matplotlib lightkurve
+          pip install pandas numpy requests astropy matplotlib lightkurve transitleastsquares
 
       - name: Run Exoplanet Pipeline
         env:
