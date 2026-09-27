@@ -1,4 +1,4 @@
-# Save this file as: planet_nine_motion_detector.py
+# Save this file as: planet_nine_scanner.py
 
 import pandas as pd
 import numpy as np
@@ -17,22 +17,25 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 def fetch_epoch_data(catalog_table, max_rows=150):
     """
     Queries an infrared catalog table from the NASA IRSA TAP service 
-    with built-in retry logic and correct table schema references.
+    using a spatial box constraint to prevent server-side read timeouts.
     """
     print(f"🛰️ Querying NASA IRSA TAP for catalog: {catalog_table}...")
     url = "https://irsa.ipac.caltech.edu/TAP/sync"
     
+    # Constrain the search using a spatial BOX search (RA, Dec, Width, Height) 
+    # to avoid expensive global table scans that trigger timeouts.
     query_str = f"""
     select top {max_rows} ra, dec, w1mpro, w2mpro 
     from {catalog_table} 
-    where w1mpro > 14.0 and w2mpro > 13.0
-    order by w1mpro asc
+    where CONTAINS(POINT(ra, dec), BOX(150.0, 10.0, 2.0, 2.0)) = 1
+      and w1mpro > 14.0 
+      and w2mpro > 13.0
     """
     
     params = {'query': query_str, 'format': 'csv'}
     headers = {'User-Agent': 'Mozilla/5.0'}
     
-    # Retry loop to handle public server throttling or timeouts
+    # Retry loop to handle public server throttling or transient drops
     for attempt in range(3):
         try:
             response = requests.get(url, params=params, headers=headers, timeout=60, verify=False)
