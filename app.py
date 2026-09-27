@@ -65,10 +65,15 @@ star_marker_size = max(80, float(star_radius) * 120)
 ax.scatter([0.0], [0], color=star_color, s=star_marker_size, zorder=6, label=f'Host Star ({star_teff}K)')
 
 # 2. Draw the Habitable Zone (Green Shaded Region)
-hz_inner = row['hz_inner_edge_au']
-hz_outer = row['hz_outer_edge_au']
+# Ensure Habitable Zone bounds are standard scalar floats
+hz_inner = float(hz_inner)
+hz_outer = float(hz_outer)
 ax.axvspan(hz_inner, hz_outer, color='#28a745', alpha=0.4, label='Goldilocks Zone')
 
+
+
+# Then apply them to the axis span plot:
+ax.axvspan(hz_inner, hz_outer, color='#28a745', alpha=0.4, label='Goldilocks Zone')
 # 3. Plot the Planet's Orbit
 planet_dist = row['calculated_distance_au']
 ax.scatter([planet_dist], [0], color='#1f77b4', s=150, zorder=5, edgecolors='white', label='Candidate Orbit')
