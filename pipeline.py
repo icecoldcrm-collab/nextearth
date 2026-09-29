@@ -8,11 +8,38 @@ import lightkurve as lk
 from transitleastsquares import transitleastsquares
 import matplotlib.pyplot as plt
 
+def fetch_dynamic_target_queue(limit=50):
+    """
+    Dynamically queries the NASA Exoplanet Archive to pull a batch 
+    of recent TESS targets or candidates to screen.
+    """
+    url = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
+    # Query a list of recent TIC targets from the TOI or cumulative table
+    query = f"select top {limit} tic, toi from toi order by rast_date desc"
+    params = {'query': query, 'format': 'json'}
+    
+    queue = []
+    try:
+        response = requests.get(url, params=params, timeout=30)
+        if response.status_code == 200:
+            data = response.json()
+            for row in data:
+                tic = row.get('tic')
+                if tic:
+                    queue.append({"name": f"TIC {tic}", "id": str(tic)})
+    except Exception as e:
+        print(f"⚠️ Failed to fetch dynamic queue from archive: {e}")
+        
+    # Fallback default queue if dynamic fetch is empty
+    if not queue:
+        queue = [
+            {"name": "TIC 158297421", "id": "158297421"},
+            {"name": "TIC 307210830", "id": "307210830"}
+        ]
+        
+    return queue
+
 def is_known_exoplanet(tic_id):
-    """
-    Queries the NASA Exoplanet Archive TAP service to check 
-    if a target TIC ID is already cataloged as a confirmed or known exoplanet/TOI.
-    """
     url = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
     clean_id = str(tic_id).replace("TIC", "").strip()
     query = f"select toi from toi where tic = {clean_id}"
@@ -23,20 +50,15 @@ def is_known_exoplanet(tic_id):
         if response.status_code == 200:
             data = response.json()
             if len(data) > 0:
-                print(f"⚠️️ Target TIC {clean_id} is already a known/cataloged object in the archive.")
                 return True
-    except Exception as e:
-        print(f"⚠️ Archive check warning (proceeding with caution): {e}")
-        
+    except Exception:
+        pass
     return False
 
 def run_pipeline():
-    # Queue of candidate systems to scan sequentially
-    target_queue = [
-        {"name": "TIC 158297421", "id": "158297421"},
-        {"name": "TIC 307210830", "id": "307210830"},
-        {"name": "TIC 25155310", "id": "25155310"}
-    ]
+    print("🔭 Fetching dynamic target queue from NASA Exoplanet Archive...")
+    target_queue = fetch_dynamic_target_queue(limit=25)
+    print(f"📋 Loaded {len(target_queue)} targets into processing queue.")
     
     valid_discovery_found = False
 
@@ -44,21 +66,23 @@ def run_pipeline():
         target_name = item["name"]
         tic_id_num = item["id"]
         
-        print(f"\n🔭 Inspecting target queue item: {target_name}...")
+        print(f"\n----------------------------------------")
+        print(f"🔭 Inspecting target: {target_name}")
         
-        # 1. Archive check: skip known objects
+        # 1. Skip if already cataloged
         if is_known_exoplanet(tic_id_num):
-            print(f"🛑 Skipping {target_name}: Already cataloged. Moving to next record.")
+            print(f"🛑 Skipping {target_name}: Already cataloged in archive.")
             continue
 
         try:
-            # 2. Search light curve data
+            # 2. Search light curve data via Lightkurve
             search_result = lk.search_lightcurve(target_name, mission="TESS", author="SPOC")
             if len(search_result) == 0:
-                print(f"❌ No light curve data found for {target_name}. Moving to next record.")
+                print(f"❌ No SPOC light curve found for {target_name}. Skipping.")
                 continue
                 
-            lc = search_result[0].download().remove_outliers()
+            # Download, clean outliers, and normalize flux to ~1.0 for TLS compatibility
+            lc = search_result[0].download().remove_outliers().normalize()
             time = lc.time.value
             flux = lc.flux.value
 
@@ -68,14 +92,13 @@ def run_pipeline():
             # 3. Run Transit Least Squares (TLS) analysis
             print(f"🔬 Running TLS analysis for {target_name}...")
             model = transitleastsquares(time, flux)
-            results = model.power(period_min=1.0, period_max=15.0)
+            results = model.power(period_min=1.0, period_max=15.0, oversampling_factor=3)
 
-            # 4. Strict validation: if inconclusive/NaN, discard and move to next record
+            # 4. Validate results
             if results.period is None or np.isnan(results.period) or np.isnan(results.snr):
-                print(f"⚠️ TLS analysis inconclusive for {target_name}. Discarding and moving to next record.")
+                print(f"⚠️ TLS analysis inconclusive for {target_name}. Discarding and moving next.")
                 continue
 
-            # Valid candidate found! Extract telemetry metrics
             period = results.period
             transit_depth = results.depth
             snr = results.snr
@@ -103,26 +126,6 @@ def run_pipeline():
             df_candidates.to_csv(csv_file, mode='a', index=False, header=not file_exists)
             print(f"💾 Successfully recorded verified candidate {target_name} to '{csv_file}'.")
 
-            # Generate submission report
-            report_content = f"""=============================================================
-NASA EXOFOP NEW PLANET CANDIDATE DISCOVERY REPORT
-Generated by: Automated TLS Analysis Engine (New Discovery Filter Active)
-=============================================================
-Target Identifier : {target_name}
-Candidate Name    : {target_name}-new-candidate
-Orbital Period    : {period:.5f} days
-Transit Depth     : {transit_depth:.1f} ppm
-Planet Radius     : {planet_radius:.2f} Earth Radii
-Calculated Axis   : {calculated_axis:.4f} AU
-Signal-to-Noise   : {snr:.2f}
-Sizing Profile    : {sizing_profile}
-Habitable Status  : ❌ {habitable_status}
-Archive Status    : ✅ Verified New / Uncataloged Target
-=============================================================
-"""
-            with open(f"exofop_submission_{tic_id_num}.txt", "w") as f:
-                f.write(report_content)
-
             # Generate diagnostic chart
             plt.figure(figsize=(10, 4))
             plt.plot(results.folded_phase, results.folded_y, '.', color='navy', alpha=0.3, label='Folded Data')
@@ -135,14 +138,14 @@ Archive Status    : ✅ Verified New / Uncataloged Target
             plt.close()
 
             valid_discovery_found = True
-            break # Stop queue execution once a clean novel discovery is processed and logged
+            break # Stop after finding our clean discovery for this pipeline cycle
 
         except Exception as e:
-            print(f"❌ Error processing {target_name}: {e}. Moving to next record.")
+            print(f"❌ Error processing {target_name}: {e}. Moving to next.")
             continue
 
     if not valid_discovery_found:
-        print("ℹ️ Scan cycle complete: No valid uncataloged candidates were verified in this batch.")
+        print("ℹ️ Scan cycle complete: Checked available dynamic batch, no valid uncataloged candidates verified in this run.")
 
 if __name__ == "__main__":
     run_pipeline()
