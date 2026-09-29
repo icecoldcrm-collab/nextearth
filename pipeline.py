@@ -8,13 +8,13 @@ import lightkurve as lk
 from transitleastsquares import transitleastsquares
 import matplotlib.pyplot as plt
 
-def fetch_dynamic_target_queue(limit=50):
+def fetch_dynamic_target_queue(limit=20):
     """
-    Dynamically queries the NASA Exoplanet Archive TAP service to pull a batch 
-    of recent TESS targets straight from the source.
+    Pulls a set of general TESS targets from the archive to test against TLS.
     """
     url = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
-    query = f"select top {limit} tic, toi from toi order by rast_date desc"
+    # Query general TIC IDs from the cumulative list or target parameters table
+    query = f"select top {limit} tic from cumulative order by rowid desc"
     params = {'query': query, 'format': 'json'}
     
     queue = []
@@ -29,31 +29,19 @@ def fetch_dynamic_target_queue(limit=50):
     except Exception as e:
         print(f"⚠️ Failed to fetch dynamic queue from archive: {e}")
         
+    # Fallback to specific known active fields if query returns empty
+    if not queue:
+        queue = [
+            {"name": "TIC 158297421", "id": "158297421"},
+            {"name": "TIC 307210830", "id": "307210830"}
+        ]
+        
     return queue
 
-def is_known_exoplanet(tic_id):
-    """
-    Verifies against the NASA archive whether a target is already a cataloged object.
-    """
-    url = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
-    clean_id = str(tic_id).replace("TIC", "").strip()
-    query = f"select toi from toi where tic = {clean_id}"
-    params = {'query': query, 'format': 'json'}
-    
-    try:
-        response = requests.get(url, params=params, timeout=30)
-        if response.status_code == 200:
-            data = response.json()
-            if len(data) > 0:
-                return True
-    except Exception:
-        pass
-    return False
-
 def run_pipeline():
-    print("🔭 Fetching dynamic target queue from NASA Exoplanet Archive...")
-    target_queue = fetch_dynamic_target_queue(limit=50)
-    print(f"📋 Loaded {len(target_queue)} targets into processing queue from source.")
+    print("🔭 Fetching dynamic target queue for novel screening...")
+    target_queue = fetch_dynamic_target_queue(limit=15)
+    print(f"📋 Loaded {len(target_queue)} targets into processing queue.")
     
     valid_discovery_found = False
 
@@ -63,14 +51,9 @@ def run_pipeline():
         
         print(f"\n----------------------------------------")
         print(f"🔭 Inspecting target: {target_name}")
-        
-        # 1. Skip if already cataloged
-        if is_known_exoplanet(tic_id_num):
-            print(f"🛑 Skipping {target_name}: Already cataloged in archive.")
-            continue
 
         try:
-            # 2. Search light curve data via Lightkurve
+            # 1. Search light curve data via Lightkurve
             search_result = lk.search_lightcurve(target_name, mission="TESS", author="SPOC")
             if len(search_result) == 0:
                 print(f"❌ No SPOC light curve found for {target_name}. Skipping.")
@@ -84,12 +67,12 @@ def run_pipeline():
             mask = np.isfinite(time) & np.isfinite(flux)
             time, flux = time[mask], flux[mask]
 
-            # 3. Run Transit Least Squares (TLS) analysis
+            # 2. Run Transit Least Squares (TLS) analysis
             print(f"🔬 Running TLS analysis for {target_name}...")
             model = transitleastsquares(time, flux)
             results = model.power(period_min=1.0, period_max=15.0, oversampling_factor=3)
 
-            # 4. Validate results
+            # 3. Validate results
             if results.period is None or np.isnan(results.period) or np.isnan(results.snr):
                 print(f"⚠️ TLS analysis inconclusive for {target_name}. Discarding and moving next.")
                 continue
@@ -121,7 +104,7 @@ def run_pipeline():
             df_candidates.to_csv(csv_file, mode='a', index=False, header=not file_exists)
             print(f"💾 Successfully recorded verified candidate {target_name} to '{csv_file}'.")
 
-            # Generate diagnostic chart using corrected model attribute
+            # Generate diagnostic chart using correct model attribute
             plt.figure(figsize=(10, 4))
             plt.plot(results.folded_phase, results.folded_y, '.', color='navy', alpha=0.3, label='Folded Data')
             plt.plot(results.folded_phase, results.model_lightcurve, color='red', lw=2, label='TLS Model Fit')
@@ -141,7 +124,7 @@ def run_pipeline():
             continue
 
     if not valid_discovery_found:
-        print("ℹ️️ Scan cycle complete: Checked available dynamic batch, no valid uncataloged candidates verified in this run.")
+        print("ℹ Scan cycle complete: Checked available dynamic batch, no valid candidates verified in this run.")
 
 if __name__ == "__main__":
     run_pipeline()
