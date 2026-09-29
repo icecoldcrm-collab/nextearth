@@ -8,13 +8,13 @@ import lightkurve as lk
 from transitleastsquares import transitleastsquares
 import matplotlib.pyplot as plt
 
-def fetch_dynamic_target_queue(limit=20):
+def fetch_dynamic_target_queue(limit=50):
     """
-    Pulls a set of general TESS targets from the archive to test against TLS.
+    Dynamically queries the NASA Exoplanet Archive TAP service to pull a batch 
+    of targets straight from the cumulative table. Exits with an error if source fails.
     """
     url = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
-    # Query general TIC IDs from the cumulative list or target parameters table
-    query = f"select top {limit} tic from cumulative order by rowid desc"
+    query = f"select top {limit} tic_id from cumulative where tic_id is not null"
     params = {'query': query, 'format': 'json'}
     
     queue = []
@@ -23,26 +23,25 @@ def fetch_dynamic_target_queue(limit=20):
         if response.status_code == 200:
             data = response.json()
             for row in data:
-                tic = row.get('tic')
+                tic = row.get('tic_id') or row.get('tic')
                 if tic:
                     queue.append({"name": f"TIC {tic}", "id": str(tic)})
+        else:
+            print(f"❌ Error: NASA Archive returned status code {response.status_code}")
     except Exception as e:
-        print(f"⚠️ Failed to fetch dynamic queue from archive: {e}")
-        
-    # Fallback to specific known active fields if query returns empty
-    if not queue:
-        queue = [
-            {"name": "TIC 158297421", "id": "158297421"},
-            {"name": "TIC 307210830", "id": "307210830"}
-        ]
+        print(f"❌ Critical Error fetching dynamic queue from archive: {e}")
         
     return queue
 
 def run_pipeline():
-    print("🔭 Fetching dynamic target queue for novel screening...")
-    target_queue = fetch_dynamic_target_queue(limit=15)
-    print(f"📋 Loaded {len(target_queue)} targets into processing queue.")
+    print("🔭 Fetching dynamic target queue from NASA Exoplanet Archive...")
+    target_queue = fetch_dynamic_target_queue(limit=50)
     
+    if not target_queue:
+        print("❌ Pipeline aborted: Target queue from source is completely empty.")
+        return
+
+    print(f"📋 Loaded {len(target_queue)} targets into processing queue from source.")
     valid_discovery_found = False
 
     for item in target_queue:
