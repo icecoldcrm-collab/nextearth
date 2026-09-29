@@ -10,11 +10,10 @@ import matplotlib.pyplot as plt
 
 def fetch_dynamic_target_queue(limit=50):
     """
-    Dynamically queries the NASA Exoplanet Archive to pull a batch 
-    of recent TESS targets or candidates to screen.
+    Dynamically queries the NASA Exoplanet Archive TAP service to pull a batch 
+    of recent TESS targets straight from the source.
     """
     url = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
-    # Query a list of recent TIC targets from the TOI or cumulative table
     query = f"select top {limit} tic, toi from toi order by rast_date desc"
     params = {'query': query, 'format': 'json'}
     
@@ -30,16 +29,12 @@ def fetch_dynamic_target_queue(limit=50):
     except Exception as e:
         print(f"⚠️ Failed to fetch dynamic queue from archive: {e}")
         
-    # Fallback default queue if dynamic fetch is empty
-    if not queue:
-        queue = [
-            {"name": "TIC 158297421", "id": "158297421"},
-            {"name": "TIC 307210830", "id": "307210830"}
-        ]
-        
     return queue
 
 def is_known_exoplanet(tic_id):
+    """
+    Verifies against the NASA archive whether a target is already a cataloged object.
+    """
     url = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
     clean_id = str(tic_id).replace("TIC", "").strip()
     query = f"select toi from toi where tic = {clean_id}"
@@ -57,8 +52,8 @@ def is_known_exoplanet(tic_id):
 
 def run_pipeline():
     print("🔭 Fetching dynamic target queue from NASA Exoplanet Archive...")
-    target_queue = fetch_dynamic_target_queue(limit=25)
-    print(f"📋 Loaded {len(target_queue)} targets into processing queue.")
+    target_queue = fetch_dynamic_target_queue(limit=50)
+    print(f"📋 Loaded {len(target_queue)} targets into processing queue from source.")
     
     valid_discovery_found = False
 
@@ -126,16 +121,17 @@ def run_pipeline():
             df_candidates.to_csv(csv_file, mode='a', index=False, header=not file_exists)
             print(f"💾 Successfully recorded verified candidate {target_name} to '{csv_file}'.")
 
-            # Generate diagnostic chart
+            # Generate diagnostic chart using corrected model attribute
             plt.figure(figsize=(10, 4))
             plt.plot(results.folded_phase, results.folded_y, '.', color='navy', alpha=0.3, label='Folded Data')
-            plt.plot(results.folded_phase, results.model_folded_y, color='red', lw=2, label='TLS Model Fit')
+            plt.plot(results.folded_phase, results.model_lightcurve, color='red', lw=2, label='TLS Model Fit')
             plt.xlabel("Phase")
             plt.ylabel("Normalized Flux")
             plt.title(f"New Discovery Transit Fit: {target_name}")
             plt.legend()
             plt.savefig(f"transit_chart_{tic_id_num}.png", dpi=200, bbox_inches='tight')
             plt.close()
+            print(f"💾 Transit chart saved as 'transit_chart_{tic_id_num}.png'.")
 
             valid_discovery_found = True
             break # Stop after finding our clean discovery for this pipeline cycle
@@ -145,7 +141,7 @@ def run_pipeline():
             continue
 
     if not valid_discovery_found:
-        print("ℹ️ Scan cycle complete: Checked available dynamic batch, no valid uncataloged candidates verified in this run.")
+        print("ℹ️️ Scan cycle complete: Checked available dynamic batch, no valid uncataloged candidates verified in this run.")
 
 if __name__ == "__main__":
     run_pipeline()
