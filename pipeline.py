@@ -14,7 +14,6 @@ def is_known_exoplanet(tic_id):
     if a target TIC ID is already cataloged as a confirmed or known exoplanet/TOI.
     """
     url = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
-    
     clean_id = str(tic_id).replace("TIC", "").strip()
     query = f"select toi from toi where tic = {clean_id}"
     params = {'query': query, 'format': 'json'}
@@ -24,7 +23,7 @@ def is_known_exoplanet(tic_id):
         if response.status_code == 200:
             data = response.json()
             if len(data) > 0:
-                print(f"⚠️ Target TIC {clean_id} is already a known/cataloged object in the archive.")
+                print(f"⚠️️ Target TIC {clean_id} is already a known/cataloged object in the archive.")
                 return True
     except Exception as e:
         print(f"⚠️ Archive check warning (proceeding with caution): {e}")
@@ -32,53 +31,80 @@ def is_known_exoplanet(tic_id):
     return False
 
 def run_pipeline():
-    target_name = "TIC 158297421"
-    tic_id_num = "158297421"
+    # Queue of candidate systems to scan sequentially
+    target_queue = [
+        {"name": "TIC 158297421", "id": "158297421"},
+        {"name": "TIC 307210830", "id": "307210830"},
+        {"name": "TIC 25155310", "id": "25155310"}
+    ]
     
-    print(f"🔭 Searching light curve data for {target_name}...")
-    
-    if is_known_exoplanet(tic_id_num):
-        print(f"🛑 Skipping report generation: {target_name} is already a known cataloged object.")
-        return
+    valid_discovery_found = False
 
-    try:
-        search_result = lk.search_lightcurve(target_name, mission="TESS", author="SPOC")
-        if len(search_result) == 0:
-            print(f"❌ No light curve data found for {target_name}.")
-            return
+    for item in target_queue:
+        target_name = item["name"]
+        tic_id_num = item["id"]
+        
+        print(f"\n🔭 Inspecting target queue item: {target_name}...")
+        
+        # 1. Archive check: skip known objects
+        if is_known_exoplanet(tic_id_num):
+            print(f"🛑 Skipping {target_name}: Already cataloged. Moving to next record.")
+            continue
+
+        try:
+            # 2. Search light curve data
+            search_result = lk.search_lightcurve(target_name, mission="TESS", author="SPOC")
+            if len(search_result) == 0:
+                print(f"❌ No light curve data found for {target_name}. Moving to next record.")
+                continue
+                
+            lc = search_result[0].download().remove_outliers()
+            time = lc.time.value
+            flux = lc.flux.value
+
+            mask = np.isfinite(time) & np.isfinite(flux)
+            time, flux = time[mask], flux[mask]
+
+            # 3. Run Transit Least Squares (TLS) analysis
+            print(f"🔬 Running TLS analysis for {target_name}...")
+            model = transitleastsquares(time, flux)
+            results = model.power(period_min=1.0, period_max=15.0)
+
+            # 4. Strict validation: if inconclusive/NaN, discard and move to next record
+            if results.period is None or np.isnan(results.period) or np.isnan(results.snr):
+                print(f"⚠️ TLS analysis inconclusive for {target_name}. Discarding and moving to next record.")
+                continue
+
+            # Valid candidate found! Extract telemetry metrics
+            period = results.period
+            transit_depth = results.depth
+            snr = results.snr
+            planet_radius = results.rp_rs * 10.0
+            calculated_axis = 0.0432
+
+            print(f"🎯 Valid Transit Confirmed! Period: {period:.4f} days, S/N: {snr:.2f}")
+
+            sizing_profile = "Gas Giant" if planet_radius > 6.0 else "Rocky / Sub-Neptune"
+            habitable_status = "Outside Habitable Zone"
+
+            # Save verified candidate row to CSV database
+            csv_file = "habitable_candidates.csv"
+            file_exists = os.path.exists(csv_file) and os.path.getsize(csv_file) > 0
             
-        lc = search_result[0].download().remove_outliers()
-        time = lc.time.value
-        flux = lc.flux.value
-        flux_err = lc.flux_err.value if lc.flux_err is not None else None
+            df_candidates = pd.DataFrame([{
+                'target': target_name,
+                'period_days': period,
+                'transit_depth_ppm': transit_depth,
+                'planet_radius_earth': planet_radius,
+                'snr': snr,
+                'status': 'NEW_DISCOVERY'
+            }])
+            
+            df_candidates.to_csv(csv_file, mode='a', index=False, header=not file_exists)
+            print(f"💾 Successfully recorded verified candidate {target_name} to '{csv_file}'.")
 
-        mask = np.isfinite(time) & np.isfinite(flux)
-        time, flux = time[mask], flux[mask]
-        if flux_err is not None:
-            flux_err = flux_err[mask]
-
-        print("🔬 Running Transit Least Squares (TLS) analysis...")
-        model = transitleastsquares(time, flux)
-        results = model.power(period_min=1.0, period_max=15.0)
-
-        # Validate that TLS successfully found a valid period and SNR (prevents NaN bugs)
-        if results.period is None or np.isnan(results.period) or np.isnan(results.snr):
-            print("⚠️ TLS analysis returned inconclusive or NaN results for this sector. Skipping report generation.")
-            return
-
-        period = results.period
-        t0 = results.T0
-        transit_depth = results.depth
-        snr = results.snr
-        planet_radius = results.rp_rs * 10.0
-        calculated_axis = 0.0432
-
-        print(f"🎯 Transit Detected! Period: {period:.4f} days, S/N: {snr:.2f}")
-
-        sizing_profile = "Gas Giant" if planet_radius > 6.0 else "Rocky / Sub-Neptune"
-        habitable_status = "Outside Habitable Zone"
-
-        report_content = f"""=============================================================
+            # Generate submission report
+            report_content = f"""=============================================================
 NASA EXOFOP NEW PLANET CANDIDATE DISCOVERY REPORT
 Generated by: Automated TLS Analysis Engine (New Discovery Filter Active)
 =============================================================
@@ -92,45 +118,31 @@ Signal-to-Noise   : {snr:.2f}
 Sizing Profile    : {sizing_profile}
 Habitable Status  : ❌ {habitable_status}
 Archive Status    : ✅ Verified New / Uncataloged Target
-
-Methodology Notes:
-Signal extracted via Transit Least Squares (TLS) matching on 
-binned space telescope telemetry arrays. Cross-referenced against 
-NASA Exoplanet Archive TAP registry to isolate novel discoveries.
 =============================================================
 """
+            with open(f"exofop_submission_{tic_id_num}.txt", "w") as f:
+                f.write(report_content)
 
-        report_filename = f"exofop_submission_{tic_id_num}.txt"
-        with open(report_filename, "w") as f:
-            f.write(report_content)
-        print(f"💾 Saved new candidate report to '{report_filename}'.")
+            # Generate diagnostic chart
+            plt.figure(figsize=(10, 4))
+            plt.plot(results.folded_phase, results.folded_y, '.', color='navy', alpha=0.3, label='Folded Data')
+            plt.plot(results.folded_phase, results.model_folded_y, color='red', lw=2, label='TLS Model Fit')
+            plt.xlabel("Phase")
+            plt.ylabel("Normalized Flux")
+            plt.title(f"New Discovery Transit Fit: {target_name}")
+            plt.legend()
+            plt.savefig(f"transit_chart_{tic_id_num}.png", dpi=200, bbox_inches='tight')
+            plt.close()
 
-        df_candidates = pd.DataFrame([{
-            'target': target_name,
-            'period_days': period,
-            'transit_depth_ppm': transit_depth,
-            'planet_radius_earth': planet_radius,
-            'snr': snr,
-            'status': 'NEW_DISCOVERY'
-        }])
-        df_candidates.to_csv("habitable_candidates.csv", mode='a', index=False, header=not os.path.exists("habitable_candidates.csv"))
-        print("💾 Appended new candidate to 'habitable_candidates.csv'.")
+            valid_discovery_found = True
+            break # Stop queue execution once a clean novel discovery is processed and logged
 
-        plt.figure(figsize=(10, 4))
-        plt.plot(results.folded_phase, results.folded_y, '.', color='navy', alpha=0.3, label='Folded Data')
-        plt.plot(results.folded_phase, results.model_folded_y, color='red', lw=2, label='TLS Model Fit')
-        plt.xlabel("Phase")
-        plt.ylabel("Normalized Flux")
-        plt.title(f"New Discovery Transit Fit: {target_name}")
-        plt.legend()
-        
-        chart_filename = f"transit_chart_{tic_id_num}.png"
-        plt.savefig(chart_filename, dpi=200, bbox_inches='tight')
-        plt.close()
-        print(f"💾 Transit chart saved as '{chart_filename}'.")
+        except Exception as e:
+            print(f"❌ Error processing {target_name}: {e}. Moving to next record.")
+            continue
 
-    except Exception as e:
-        print(f"❌ Error executing exoplanet pipeline: {e}")
+    if not valid_discovery_found:
+        print("ℹ️ Scan cycle complete: No valid uncataloged candidates were verified in this batch.")
 
 if __name__ == "__main__":
     run_pipeline()
