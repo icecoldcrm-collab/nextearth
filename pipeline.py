@@ -11,10 +11,11 @@ import matplotlib.pyplot as plt
 def fetch_dynamic_target_queue(limit=50):
     """
     Dynamically queries the NASA Exoplanet Archive TAP service to pull a batch 
-    of targets straight from the cumulative table. Exits with an error if source fails.
+    of TESS targets straight from the official 'toi' table using stable syntax.
     """
     url = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
-    query = f"select top {limit} tic_id from cumulative where tic_id is not null"
+    # Clean ADQL select query targeting the TESS object of interest catalog
+    query = f"select top {limit} tic from toi"
     params = {'query': query, 'format': 'json'}
     
     queue = []
@@ -23,7 +24,7 @@ def fetch_dynamic_target_queue(limit=50):
         if response.status_code == 200:
             data = response.json()
             for row in data:
-                tic = row.get('tic_id') or row.get('tic')
+                tic = row.get('tic')
                 if tic:
                     queue.append({"name": f"TIC {tic}", "id": str(tic)})
         else:
